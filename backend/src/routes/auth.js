@@ -16,7 +16,7 @@ const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 10);
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 20,
+  limit: parseInt(process.env.LOGIN_RATE_LIMIT || '20', 10),
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { message: 'Terlalu banyak percobaan login. Coba lagi dalam 15 menit.' },
