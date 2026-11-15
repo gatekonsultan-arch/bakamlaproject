@@ -1,0 +1,40 @@
+# Oracle Database Free + API absensi. Nginx & HTTPS dipasang langsung di host (lihat docs/DEPLOY_HOSTINGER.md).
+# Semua port hanya di-bind ke 127.0.0.1 -> TIDAK bisa diakses langsung dari internet.
+services:
+  oracle:
+    image: gvenzl/oracle-free:23-slim
+    restart: unless-stopped
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_SYS_PASSWORD}
+      APP_USER: ${DB_USER}
+      APP_USER_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    # Tidak dipublikasikan ke host. Untuk akses SQL Developer gunakan SSH tunnel:
+    # ports: ["127.0.0.1:1521:1521"]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  api:
+    build: ../backend
+    restart: unless-stopped
+    depends_on:
+      oracle:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DB_CONNECT_STRING: oracle:1521/FREEPDB1
+      SQL_DIR: /app/database
+      PORT: 3000
+      TRUST_PROXY: "1"
+    volumes:
+      - ../database:/app/database:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  oracle-data:

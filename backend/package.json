@@ -1,0 +1,29 @@
+{
+  "name": "absensi-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "REST API absensi geotagging dengan Oracle Database",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "migrate": "node scripts/migrate.js",
+    "create-superadmin": "node scripts/create-superadmin.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^5.3.0",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "oracledb": "^6.10.0",
+    "zod": "^3.25.76"
+  }
+}
