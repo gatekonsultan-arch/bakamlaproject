@@ -82,7 +82,7 @@ Saat Logistik mengajukan pembelian, Project Manager melihat **proyeksi** sebelum
 - Foto diunggah dari HP/komputer. Jam foto diambil dari EXIF, lalu foto diperkecil dan **metadata GPS dihapus**. Aktivitas dipilih per foto dari pustaka aktivitas.
 - Alur: **Draf → Dikirim → Diketahui PIC Site → Disetujui HSE Manager**. Laporan dapat dikembalikan untuk revisi dengan catatan. Setelah dikirim, laporan terkunci.
 - **Tanda tangan digital wajib**: tiap penanda tangan (HSE Officer, PIC Site, HSE Manager) harus mengunggah tanda tangan, dengan digambar di aplikasi atau unggah foto/scan. Tanpa tanda tangan, server menolak Kirim, Mengetahui, dan Setujui. Latar putih otomatis dibuat transparan. Tanda tangan **dibekukan** pada laporan saat ditandatangani, sehingga laporan yang sudah disetujui tidak berubah meskipun tanda tangan diganti kemudian.
-- Logo kop diunggah di ⚙ Pengaturan Laporan. Jika belum ada, kop menampilkan nama kontraktor sebagai teks.
+- **Logo kop bawaan: PRIMA (kiri) & SRT (kanan)** (`backend/assets/logos/`). Logo ini otomatis dipakai semua lokasi; untuk mengganti logo khusus satu lokasi, unggah di ⚙ Pengaturan Laporan. Kontraktor bawaan: PT Prima Integra Utama.
 - Cetak: tombol 🖨 → PDF bahasa Inggris (resmi) atau bahasa Indonesia. Laporan yang belum disetujui diberi watermark **DRAFT**.
 - Pengaturan per lokasi (kop, proyek, kontraktor, inspektur, APD, logo, site plan dasar): ikon ⚙ di halaman Laporan K3.
 

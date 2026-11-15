@@ -112,6 +112,15 @@ function expect(name, cond, info) {
   await consent(BASE, ho);
   const hoIn = await postAttendance(BASE, '/api/attendance/check-in', ho, { latitude: -5.06, longitude: 119.47, accuracy: 10 }, await selfie());
   expect('HSE Officer check-in (selfie)', hoIn.status === 201, hoIn.body);
+  const fresh = (await call('GET', `/api/hse-reports/settings/${site.id}`, { token: hm })).body.settings;
+  expect('lokasi baru otomatis memakai logo bawaan PRIMA (kiri) & SRT (kanan)',
+    fresh.imgUrl.logoL === '/api/files/default/logo-prima.png' && fresh.imgUrl.logoR === '/api/files/default/logo-srt.png'
+    && fresh.imgDefault.logoL && fresh.con === 'PT Prima Integra Utama', fresh.imgUrl);
+  for (const u of [fresh.imgUrl.logoL, fresh.imgUrl.logoR]) {
+    const r = await fetch(BASE + u);
+    expect(`logo bawaan bisa dibuka (${u.split('/').pop()})`, r.status === 200 && (r.headers.get('content-type') || '').includes('image/png'));
+  }
+  expect('nama file lain di folder logo bawaan ditolak (404)', (await fetch(`${BASE}/api/files/default/..%2F..%2Fpackage.json`)).status === 404);
   const sett = await call('PUT', `/api/hse-reports/settings/${site.id}`, { token: hm, body: { con: 'PT Kontraktor Uji', loc: 'Site Uji, Makassar', start: '2026-11-01', pm: 'Nama PM', members: [['Operator Satu', 'Heavy Equipment Operator']] } });
   expect('HSE Manager atur pengaturan laporan lokasi', sett.status === 200, sett.body);
   const noRep = await call('POST', '/api/hse-reports', { token: lg, body: { siteId: site.id } });
@@ -222,7 +231,8 @@ function expect(name, cond, info) {
   const html = await (await fetch(BASE + link.body.url)).text();
   expect('dokumen cetak berisi bagian A-J', ['A. PROJECT INFORMATION', 'E. WORK ACTIVITIES', 'F. INCIDENT', 'G. CUMULATIVE HSE STATISTICS', 'J. APPROVAL', 'EXCAVATION WORKS', 'WEATHER MONITORING'].every((s) => html.includes(s)));
   expect('dokumen disetujui tanpa watermark DRAF', !html.includes('class="draft"'));
-  expect('logo perusahaan tampil di kop', /class="lg"><img src="\/api\/files\/settings\//.test(html));
+  expect('logo kiri unggahan lokasi tampil di kop', /class="lg"><img src="\/api\/files\/settings\//.test(html));
+  expect('logo kanan tetap logo bawaan SRT', html.includes('<img src="/api/files/default/logo-srt.png"'));
   expect('3 tanda tangan tampil di lembar persetujuan', (html.match(/\/api\/files\/signatures\//g) || []).length >= 3);
   const badPrint = await fetch(`${BASE}/api/hse-reports/${rid}/print?t=palsu`);
   expect('cetak tanpa token valid ditolak 401', badPrint.status === 401);

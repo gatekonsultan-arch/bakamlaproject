@@ -37,10 +37,22 @@ async function loadSettings(siteId) {
 }
 
 function settingsDto(s) {
-  return {
-    ...s,
-    imgUrl: Object.fromEntries(Object.entries(s.img).map(([k, v]) => [k, files.signFile('settings', v)])),
-  };
+  const imgUrl = {};
+  const imgDefault = {};
+  for (const [k, v] of Object.entries(s.img)) {
+    if (v) {
+      imgUrl[k] = files.signFile('settings', v);
+      imgDefault[k] = false;
+    } else if (lib.DEFAULT_LOGOS[k]) {
+      // Logo bawaan (PRIMA kiri, SRT kanan) bila lokasi belum mengunggah logonya sendiri.
+      imgUrl[k] = `/api/files/default/${lib.DEFAULT_LOGOS[k]}`;
+      imgDefault[k] = true;
+    } else {
+      imgUrl[k] = null;
+      imgDefault[k] = false;
+    }
+  }
+  return { ...s, imgUrl, imgDefault };
 }
 
 const HEADER = `
