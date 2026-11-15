@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../main.dart';
 import '../models/models.dart';
@@ -46,25 +47,80 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
+  /// Persetujuan foto wajah (UU PDP) — diminta sekali saja.
+  Future<bool> _ensureConsent() async {
+    final c = await _api.get('/attendance/face-consent');
+    if (c['required'] != true || c['consentedAt'] != null) return true;
+    if (!mounted) return false;
+    var agree = false;
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, set) => AlertDialog(
+          title: const Text('Persetujuan Foto Wajah'),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Absensi memerlukan selfie wajah setiap kali check-in dan check-out.'),
+            const SizedBox(height: 8),
+            Text('${c['text']}', style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 4),
+            const Text('Dasar: UU No. 27 Tahun 2022 tentang Pelindungan Data Pribadi.', style: TextStyle(fontSize: 11)),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: agree,
+              title: const Text('Saya setuju'),
+              onChanged: (v) => set(() => agree = v ?? false),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+            FilledButton(onPressed: () => agree ? Navigator.pop(ctx, true) : null, child: const Text('Lanjut')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return false;
+    await _api.post('/attendance/face-consent', {'agree': true});
+    return true;
+  }
+
+  Future<XFile?> _takeSelfie() => ImagePicker().pickImage(
+        source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.front,
+        maxWidth: 1280,
+        imageQuality: 85,
+      );
+
   Future<void> _submit(bool checkIn) async {
     setState(() {
       _busy = true;
       _lastError = null;
-      _status = 'Mengambil lokasi GPS...';
+      _status = 'Memeriksa persetujuan foto wajah...';
     });
     try {
+      if (!await _ensureConsent()) return;
+      setState(() => _status = 'Mengambil lokasi GPS...');
       final pos = await LocationService.current();
-      setState(() => _status =
-          'Lokasi didapat (akurasi ${pos.accuracy.round()} m). Mengirim ke server...');
-      final r = await _api.post(
+      setState(() => _status = 'Lokasi didapat (akurasi ${pos.accuracy.round()} m). Ambil selfie wajah Anda...');
+      final photo = await _takeSelfie();
+      if (photo == null) {
+        setState(() => _lastError = 'Selfie dibatalkan. Absen membutuhkan foto wajah.');
+        return;
+      }
+      setState(() => _status = 'Memeriksa wajah & mengirim ke server...');
+      final fields = LocationService.toPayload(pos, note: _note.text).map((k, v) => MapEntry(k, '$v'));
+      final r = await _api.upload(
         checkIn ? '/attendance/check-in' : '/attendance/check-out',
-        LocationService.toPayload(pos, note: _note.text),
+        [(field: 'photo', filename: photo.name.isEmpty ? 'selfie.jpg' : photo.name, bytes: await photo.readAsBytes())],
+        fields: fields,
       );
       _note.clear();
       setState(() => _today = Attendance.fromJson(r['attendance'] as Map<String, dynamic>));
       if (mounted) showSnack(context, r['message'] as String? ?? 'Berhasil');
     } catch (e) {
-      setState(() => _lastError = e.toString());
+      var msg = e.toString();
+      if (e is ApiException && e.data['code'] == 'FACE_REJECTED') msg = '$msg Silakan coba lagi.';
+      if (mounted) setState(() => _lastError = msg);
     } finally {
       if (mounted) {
         setState(() {
@@ -120,7 +176,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 FilledButton.icon(
                   onPressed: _busy ? null : () => _submit(t == null),
                   icon: Icon(t == null ? Icons.login : Icons.logout),
-                  label: Text(t == null ? 'Check-in Sekarang' : 'Check-out Sekarang'),
+                  label: Text(t == null ? 'Check-in (GPS + Selfie)' : 'Check-out (GPS + Selfie)'),
                   style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(56),
                     backgroundColor: t == null ? null : cs.tertiary,
@@ -164,8 +220,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ],
               const SizedBox(height: 24),
               Text(
-                'Absensi hanya diterima jika Anda berada di dalam radius lokasi kerja, '
-                'akurasi GPS cukup baik, dan tidak menggunakan aplikasi pemalsu lokasi.',
+                'Absensi hanya diterima jika Anda berada di dalam radius lokasi kerja, akurasi GPS cukup baik, '
+                'tidak menggunakan aplikasi pemalsu lokasi, dan selfie berisi wajah Anda sendiri (satu wajah, terlihat jelas). '
+                'Foto selfie dihapus otomatis setelah 90 hari.',
                 style: TextStyle(color: cs.outline, fontSize: 12),
               ),
             ],
@@ -196,6 +253,14 @@ class _TimeCard extends StatelessWidget {
           if (point?.distanceM != null)
             Text('${point!.distanceM!.round()} m dari titik lokasi',
                 style: TextStyle(color: cs.outline, fontSize: 12)),
+          if (point?.photoUrl != null) ...[
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(Api.instance.abs(point!.photoUrl), height: 72, width: 72, fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+            ),
+          ],
         ]),
       ),
     );

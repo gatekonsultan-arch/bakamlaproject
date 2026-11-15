@@ -7,19 +7,25 @@ const { authenticate, requirePermission } = require('../middleware/auth');
 const { ALL_ROLES, SITE_SCOPED_REPORT_ROLES } = require('../roles');
 const { distanceMeters, nearestSite } = require('../utils/geo');
 const { localDate, isValidDateStr, daysBetween } = require('../utils/time');
-const { badRequest, conflict, unprocessable, isUniqueViolation } = require('../utils/errors');
+const { badRequest, conflict, forbidden, unprocessable, isUniqueViolation } = require('../utils/errors');
 const { audit } = require('../utils/audit');
+const crypto = require('crypto');
+const files = require('../utils/files');
+const face = require('../utils/face');
 
 const router = express.Router();
 router.use(authenticate);
 
 const MAX_RANGE_DAYS = 93;
 
+// Field bisa datang sebagai JSON atau multipart (string) karena check-in menyertakan foto selfie.
+const num = (schema) => z.preprocess((v) => (typeof v === 'string' && v.trim() !== '' ? Number(v) : v), schema);
+const bool = z.preprocess((v) => (v === 'true' ? true : v === 'false' ? false : v), z.boolean().optional().default(false));
 const locationSchema = z.object({
-  latitude: z.number().min(-90).max(90),
-  longitude: z.number().min(-180).max(180),
-  accuracy: z.number().min(0).max(100000).nullable().optional(),
-  isMocked: z.boolean().optional().default(false),
+  latitude: num(z.number().min(-90).max(90)),
+  longitude: num(z.number().min(-180).max(180)),
+  accuracy: num(z.number().min(0).max(100000).nullable().optional()),
+  isMocked: bool,
   note: z.string().trim().max(255).optional(),
   deviceInfo: z.string().trim().max(255).optional(),
 });
@@ -29,7 +35,8 @@ const SELECT = `
          a.site_id, s.name AS site_name, TO_CHAR(a.att_date, 'YYYY-MM-DD') AS att_date,
          a.check_in_at, a.check_in_lat, a.check_in_lng, a.check_in_accuracy, a.check_in_distance_m,
          a.check_out_at, a.check_out_lat, a.check_out_lng, a.check_out_accuracy, a.check_out_distance_m,
-         a.note
+         a.note, a.check_in_photo, a.check_out_photo, a.check_in_face_score, a.check_out_face_score,
+         CASE WHEN a.photos_purged_at IS NOT NULL THEN 1 ELSE 0 END AS photos_purged
     FROM attendance a
     JOIN users u ON u.id = a.user_id
     JOIN roles r ON r.id = u.role_id
@@ -97,6 +104,8 @@ function toDto(a) {
       longitude: a.checkInLng,
       accuracy: a.checkInAccuracy,
       distanceM: a.checkInDistanceM,
+      photoUrl: files.signFile('faces', a.checkInPhoto),
+      faceScore: a.checkInFaceScore,
     },
     checkOut: a.checkOutAt
       ? {
@@ -105,11 +114,68 @@ function toDto(a) {
           longitude: a.checkOutLng,
           accuracy: a.checkOutAccuracy,
           distanceM: a.checkOutDistanceM,
+          photoUrl: files.signFile('faces', a.checkOutPhoto),
+          faceScore: a.checkOutFaceScore,
         }
       : null,
     note: a.note,
+    photosPurged: a.photosPurged === 1,
   };
 }
+
+// ---------- Selfie wajah ----------
+
+/**
+ * Validasi selfie: persetujuan UU PDP, foto ada, belum pernah dipakai, tepat satu wajah.
+ * Mengembalikan data foto yang siap disimpan (file belum ditulis).
+ */
+async function verifySelfie(req) {
+  if (!config.requireSelfie) return null;
+  const u = await db.one('SELECT face_consent_at FROM users WHERE id = :id', { id: req.user.id });
+  if (!u.faceConsentAt) {
+    throw forbidden('Anda perlu menyetujui pengambilan foto wajah untuk absensi terlebih dahulu.', { code: 'FACE_CONSENT_REQUIRED' });
+  }
+  if (!req.file) throw badRequest('Selfie wajah wajib saat absen.', { code: 'SELFIE_REQUIRED' });
+  const hash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+  const used = await db.one('SELECT user_id FROM attendance_photo_hashes WHERE photo_hash = :h', { h: hash });
+  if (used) throw conflict('Foto ini sudah pernah dipakai untuk absen. Ambil selfie baru.', { code: 'SELFIE_REUSED' });
+  let check;
+  try {
+    check = await face.checkSelfie(req.file.buffer);
+  } catch (err) {
+    if (err.status) throw err;
+    throw badRequest('Foto tidak dapat dibaca. Ambil ulang selfie.');
+  }
+  if (!check.ok) throw unprocessable(check.reason, { code: 'FACE_REJECTED', faces: check.faces });
+  return { hash, score: check.score };
+}
+
+async function storeSelfie(req, selfie) {
+  if (!selfie) return null;
+  return files.saveImage('faces', req.file.buffer, { maxSize: 800 });
+}
+
+// ---------- Persetujuan foto wajah (UU No. 27/2022 Pelindungan Data Pribadi) ----------
+const CONSENT_TEXT = 'Saya menyetujui pengambilan foto wajah (selfie) setiap kali absen, untuk tujuan verifikasi kehadiran. '
+  + 'Foto hanya dapat dilihat oleh atasan yang berwenang, disimpan paling lama {days} hari lalu dihapus otomatis, '
+  + 'dan tidak digunakan untuk tujuan lain. Saya dapat menarik persetujuan ini melalui admin.';
+
+router.get('/face-consent', async (req, res) => {
+  const u = await db.one('SELECT face_consent_at FROM users WHERE id = :id', { id: req.user.id });
+  res.json({
+    required: config.requireSelfie,
+    consentedAt: u.faceConsentAt,
+    retentionDays: config.facePhotoRetentionDays,
+    text: CONSENT_TEXT.replace('{days}', config.facePhotoRetentionDays),
+  });
+});
+
+router.post('/face-consent', async (req, res) => {
+  const { agree } = z.object({ agree: z.literal(true, { message: 'Persetujuan wajib dicentang' }) }).parse(req.body);
+  await db.query('UPDATE users SET face_consent_at = SYSTIMESTAMP WHERE id = :id AND face_consent_at IS NULL', { id: req.user.id });
+  await audit(req.user.id, 'FACE_CONSENT', `agree=${agree}`, req.ip);
+  res.json({ message: 'Persetujuan tersimpan' });
+});
 
 // ---------- Absensi milik sendiri (semua role) ----------
 
@@ -122,26 +188,39 @@ router.get('/today', async (req, res) => {
   res.json({ date: today, timezone: config.timezone, attendance: row ? toDto(row) : null });
 });
 
-router.post('/check-in', async (req, res) => {
+router.post('/check-in', files.upload.single('photo'), async (req, res) => {
   const loc = locationSchema.parse(req.body);
   assertLocationQuality(loc);
   const { site, distance } = await resolveSite(req.user, loc.latitude, loc.longitude);
   const today = localDate();
+  const existing = await db.one(
+    "SELECT id FROM attendance WHERE user_id = :u AND att_date = TO_DATE(:d, 'YYYY-MM-DD')", { u: req.user.id, d: today });
+  if (existing) throw conflict('Anda sudah melakukan check-in hari ini');
+  const selfie = await verifySelfie(req);
+  const photo = await storeSelfie(req, selfie);
 
   try {
-    await db.query(
-      `INSERT INTO attendance
-         (user_id, site_id, att_date, check_in_at, check_in_lat, check_in_lng,
-          check_in_accuracy, check_in_distance_m, note, device_info, ip_address)
-       VALUES (:userId, :siteId, TO_DATE(:d, 'YYYY-MM-DD'), SYSTIMESTAMP, :lat, :lng,
-               :acc, :dist, :note, :device, :ip)`,
-      {
-        userId: req.user.id, siteId: site.id, d: today, lat: loc.latitude, lng: loc.longitude,
-        acc: loc.accuracy ?? null, dist: round(distance), note: loc.note || null,
-        device: loc.deviceInfo || null, ip: req.ip ? String(req.ip).slice(0, 45) : null,
-      },
-    );
+    await db.withConnection(async (conn) => {
+      await conn.execute(
+        `INSERT INTO attendance
+           (user_id, site_id, att_date, check_in_at, check_in_lat, check_in_lng,
+            check_in_accuracy, check_in_distance_m, note, device_info, ip_address,
+            check_in_photo, check_in_face_score)
+         VALUES (:userId, :siteId, TO_DATE(:d, 'YYYY-MM-DD'), SYSTIMESTAMP, :lat, :lng,
+                 :acc, :dist, :note, :device, :ip, :photo, :score)`,
+        {
+          userId: req.user.id, siteId: site.id, d: today, lat: loc.latitude, lng: loc.longitude,
+          acc: loc.accuracy ?? null, dist: round(distance), note: loc.note || null,
+          device: loc.deviceInfo || null, ip: req.ip ? String(req.ip).slice(0, 45) : null,
+          photo, score: selfie?.score ?? null,
+        },
+      );
+      if (selfie) {
+        await conn.execute('INSERT INTO attendance_photo_hashes (photo_hash, user_id) VALUES (:h, :u)', { h: selfie.hash, u: req.user.id });
+      }
+    });
   } catch (err) {
+    if (photo) await files.removeFile('faces', photo);
     if (isUniqueViolation(err)) throw conflict('Anda sudah melakukan check-in hari ini');
     throw err;
   }
@@ -153,7 +232,7 @@ router.post('/check-in', async (req, res) => {
   res.status(201).json({ message: `Check-in berhasil di ${site.name}`, attendance: toDto(row) });
 });
 
-router.post('/check-out', async (req, res) => {
+router.post('/check-out', files.upload.single('photo'), async (req, res) => {
   const loc = locationSchema.parse(req.body);
   assertLocationQuality(loc);
   const today = localDate();
@@ -175,18 +254,35 @@ router.post('/check-out', async (req, res) => {
     );
   }
 
-  const r = await db.query(
-    `UPDATE attendance
-        SET check_out_at = SYSTIMESTAMP, check_out_lat = :lat, check_out_lng = :lng,
-            check_out_accuracy = :acc, check_out_distance_m = :dist,
-            note = NVL(:note, note)
-      WHERE id = :id AND check_out_at IS NULL`,
-    {
-      lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy ?? null,
-      dist: round(distance), note: loc.note || null, id: att.id,
-    },
-  );
-  if (r.rowsAffected !== 1) throw conflict('Anda sudah melakukan check-out hari ini');
+  const selfie = await verifySelfie(req);
+  const photo = await storeSelfie(req, selfie);
+  let affected = 0;
+  try {
+    affected = await db.withConnection(async (conn) => {
+      const r = await conn.execute(
+        `UPDATE attendance
+            SET check_out_at = SYSTIMESTAMP, check_out_lat = :lat, check_out_lng = :lng,
+                check_out_accuracy = :acc, check_out_distance_m = :dist,
+                note = NVL(:note, note), check_out_photo = :photo, check_out_face_score = :score
+          WHERE id = :id AND check_out_at IS NULL`,
+        {
+          lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy ?? null,
+          dist: round(distance), note: loc.note || null, id: att.id, photo, score: selfie?.score ?? null,
+        },
+      );
+      if (r.rowsAffected === 1 && selfie) {
+        await conn.execute('INSERT INTO attendance_photo_hashes (photo_hash, user_id) VALUES (:h, :u)', { h: selfie.hash, u: req.user.id });
+      }
+      return r.rowsAffected;
+    });
+  } catch (err) {
+    if (photo) await files.removeFile('faces', photo);
+    throw err;
+  }
+  if (affected !== 1) {
+    if (photo) await files.removeFile('faces', photo);
+    throw conflict('Anda sudah melakukan check-out hari ini');
+  }
   await audit(req.user.id, 'CHECK_OUT', `site=${att.siteId} dist=${round(distance)}`, req.ip);
 
   const row = await db.one(`${SELECT} WHERE a.id = :id`, { id: att.id });

@@ -1,7 +1,7 @@
 # Aplikasi Proyek: Absensi, Laporan Harian K3 & Kontrol Material — Web & Mobile
 
 Aplikasi proyek konstruksi dengan tiga modul:
-1. **Absensi geotagging**: check-in/out hanya sah di dalam radius lokasi kerja.
+1. **Absensi geotagging + selfie wajah**: check-in/out hanya sah di dalam radius lokasi kerja dan dengan selfie berisi tepat satu wajah.
 2. **Laporan Harian K3**: disusun HSE Officer, diketahui PIC Site, disetujui HSE Manager, lalu dicetak ke PDF A4. Contoh hasil: [docs/contoh-laporan-harian-k3.pdf](docs/contoh-laporan-harian-k3.pdf)
 3. **Tenaga kerja harian & rekap upah mingguan**: tukang, mandor, buruh diabsen Site Manager di lokasi (hadir / ½ hari / tidak masuk + lembur), kasbon dipotong, rekap Senin–Sabtu disetujui PM. Contoh: [docs/contoh-rekap-upah-mingguan.pdf](docs/contoh-rekap-upah-mingguan.pdf)
 4. **Kontrol material logistik**: kebutuhan → permintaan pembelian → approval → pemesanan → penerimaan → pemakaian, dengan **penanda kuning/merah** otomatis.
@@ -96,6 +96,20 @@ Saat Logistik mengajukan pembelian, Project Manager melihat **proyeksi** sebelum
    - Android melaporkan *mock location* (aplikasi fake GPS).
 4. Satu catatan per orang per hari (check-in lalu check-out), tanggal mengikuti `APP_TIMEZONE` (default WIB).
 
+### Selfie wajah saat absen
+- Check-in dan check-out **wajib selfie** (kamera depan). **Server** (bukan HP) memeriksa foto dengan model deteksi wajah
+  (`@vladmandic/face-api`, SSD MobileNet v1, backend WebAssembly, tanpa komponen native). Foto **ditolak** bila:
+  tidak ada wajah, ada lebih dari satu wajah, wajah terlalu kecil/jauh, atau foto yang sama persis pernah dipakai.
+- Ini **deteksi**, bukan pengenalan identitas: sistem tidak mencocokkan wajah dengan data wajah terdaftar.
+  Foto disimpan sebagai **bukti**, dan atasan memeriksanya di Rekap Absen (kolom Selfie, ketuk untuk memperbesar).
+- **UU No. 27/2022 (PDP):** sebelum absen pertama, karyawan diminta menyetujui pengambilan foto wajah, dan persetujuan itu dicatat.
+  Foto hanya bisa dibuka lewat tautan bertanda tangan yang berlaku sebentar, dan **dihapus otomatis setelah 90 hari**
+  (`FACE_PHOTO_RETENTION_DAYS`). Catatan kehadirannya tetap disimpan. Penghapusan berjalan tiap 6 jam di server,
+  atau manual dengan `npm run purge-face-photos`.
+- Pengaturan di `.env`: `REQUIRE_SELFIE`, `FACE_PHOTO_RETENTION_DAYS`, `FACE_MIN_SCORE`, `FACE_MIN_RATIO`.
+- Batasan: deteksi ini tidak bisa membedakan wajah asli dari foto wajah yang dipotret ulang dari layar.
+  Untuk itu diperlukan pencocokan wajah + cek keaslian (liveness), yang bisa ditambahkan kemudian.
+
 > Tidak ada sistem GPS yang 100% anti-pemalsuan (HP yang di-root bisa mengakali deteksi mock).
 > Untuk pengamanan tambahan, langkah berikutnya bisa ditambahkan foto selfie saat absen.
 
@@ -140,7 +154,9 @@ Pengujian (gunakan database uji, **bukan** produksi):
 ```bash
 cd backend
 npm test                                                            # unit test logika ambang batas
-API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test.js           # login & absensi
+# TEST_SELFIE = foto wajah SATU orang (mis. selfie Anda sendiri) untuk menguji absensi. Jangan di-commit ke repo.
+export TEST_SELFIE=/path/selfie.jpg
+API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test.js           # login & absensi + selfie
 API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-modules.js   # material & laporan K3
 API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-workers.js   # tenaga kerja & rekap upah
 ```

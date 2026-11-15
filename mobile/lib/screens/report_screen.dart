@@ -124,6 +124,7 @@ class _ReportScreenState extends State<ReportScreen> {
                       DataColumn(label: Text('Masuk')),
                       DataColumn(label: Text('Pulang')),
                       DataColumn(label: Text('Jarak (m)')),
+                      DataColumn(label: Text('Selfie')),
                     ], rows: [
                       for (final a in _items)
                         DataRow(cells: [
@@ -135,6 +136,7 @@ class _ReportScreenState extends State<ReportScreen> {
                           DataCell(Text(a.checkOut == null ? '-' : fmtTime.format(a.checkOut!.at))),
                           DataCell(Text('${a.checkIn.distanceM?.round() ?? '-'}'
                               ' / ${a.checkOut?.distanceM?.round() ?? '-'}')),
+                          DataCell(_SelfieThumbs(a)),
                         ]),
                     ]),
                   ),
@@ -165,4 +167,48 @@ class _Stat extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// Foto selfie masuk & pulang; ketuk untuk memperbesar.
+class _SelfieThumbs extends StatelessWidget {
+  final Attendance a;
+  const _SelfieThumbs(this.a);
+
+  @override
+  Widget build(BuildContext context) {
+    final urls = [a.checkIn.photoUrl, a.checkOut?.photoUrl];
+    if (urls.every((u) => u == null)) return const Text('-');
+    Widget thumb(String? u) => Padding(
+          padding: const EdgeInsets.only(right: 4),
+          child: u == null
+              ? const SizedBox(width: 36, height: 36)
+              : ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Image.network(Api.instance.abs(u), width: 36, height: 36, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 20)),
+                ),
+        );
+    return InkWell(
+      onTap: () => showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('${a.fullName} · ${a.date}'),
+          content: Wrap(spacing: 12, runSpacing: 12, children: [
+            for (final (label, p) in [('Masuk', a.checkIn), ('Pulang', a.checkOut)])
+              if (p?.photoUrl != null)
+                Column(mainAxisSize: MainAxisSize.min, children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(Api.instance.abs(p!.photoUrl), width: 220, height: 280, fit: BoxFit.cover),
+                  ),
+                  const SizedBox(height: 4),
+                  Text('$label ${fmtTime.format(p.at)} · ${p.distanceM?.round() ?? '-'} m'),
+                ]),
+          ]),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Tutup'))],
+        ),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [thumb(urls[0]), thumb(urls[1])]),
+    );
+  }
 }

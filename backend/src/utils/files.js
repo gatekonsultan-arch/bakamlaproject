@@ -16,8 +16,11 @@ const MAX_FILE_MB = parseInt(process.env.MAX_UPLOAD_MB || '15', 10);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_MB * 1024 * 1024, files: 20 },
+  // Beberapa klien (mis. aplikasi Flutter / browser tertentu) mengirim tanpa jenis file
+  // (application/octet-stream). Itu diterima di sini karena ISI file selalu divalidasi ulang
+  // oleh sharp (saveImage/saveSignature/checkSelfie): file yang bukan gambar tetap ditolak.
   fileFilter: (_req, file, cb) => {
-    if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(file.mimetype)) {
+    if (!/^image\/(jpeg|jpg|png|webp|heic|heif)$/.test(file.mimetype) && file.mimetype !== 'application/octet-stream') {
       return cb(badRequest('Hanya file gambar JPG, PNG, WEBP, atau HEIC yang diizinkan'));
     }
     cb(null, true);
