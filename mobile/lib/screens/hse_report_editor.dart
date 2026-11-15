@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api.dart';
 import '../widgets/common.dart';
+import '../widgets/signature_pad.dart';
 import 'hse_reports_screen.dart' show hseStatusColors;
 
 const _skyLabels = {'': '—', 'S': 'Cerah', 'C': 'Berawan', 'L': 'Hujan ringan', 'H': 'Hujan lebat'};
@@ -32,6 +33,8 @@ class _HseReportEditorState extends State<HseReportEditor> {
   List<Map<String, dynamic>> _members = [];
   Map<String, dynamic> _actions = {};
   Map<String, dynamic> _meta = {};
+  bool _hasSignature = true;
+  Map<String, dynamic> _sigs = {};
   bool _dirty = false;
   bool _busy = false;
 
@@ -60,6 +63,8 @@ class _HseReportEditorState extends State<HseReportEditor> {
         _photos = (r['photos'] as List).cast<Map<String, dynamic>>();
         _members = (r['members'] as List).cast<Map<String, dynamic>>();
         _actions = r['actions'] as Map<String, dynamic>;
+        _hasSignature = r['hasSignature'] == true;
+        _sigs = (r['signatures'] as Map?)?.cast<String, dynamic>() ?? {};
         _start.text = _report!['startTime'] as String;
         _finish.text = _report!['finishTime'] as String;
         _category.text = (_report!['category'] as String?) ?? '';
@@ -104,12 +109,21 @@ class _HseReportEditorState extends State<HseReportEditor> {
 
   Future<void> _workflow(String action, {String? note}) async {
     if (_dirty && !await _save(quiet: true)) return;
+    if (action != 'return' && !_hasSignature) {
+      if (!mounted) return;
+      final url = await promptSignature(context,
+          reason: 'Anda belum memiliki tanda tangan digital. Tanda tangan wajib sebelum mengirim, mengetahui, '
+              'atau menyetujui laporan. Gambar langsung atau unggah gambar tanda tangan Anda.');
+      if (url == null) return;
+      setState(() => _hasSignature = true);
+    }
     setState(() => _busy = true);
     try {
       final r = await _api.post('/hse-reports/${widget.id}/$action', note == null ? {} : {'note': note});
       if (mounted) showSnack(context, r['message'] as String? ?? 'Berhasil');
       await _load();
     } catch (e) {
+      if (e is ApiException && e.data['code'] == 'SIGNATURE_REQUIRED') setState(() => _hasSignature = false);
       if (mounted) showSnack(context, e.toString(), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -238,6 +252,28 @@ class _HseReportEditorState extends State<HseReportEditor> {
               '${r['approvedByName'] != null ? ' · Disetujui: ${r['approvedByName']}' : ''}'),
           if (r['revisionNote'] != null && r['status'] == 'REVISION')
             Text('Catatan revisi: ${r['revisionNote']}', style: const TextStyle(color: Color(0xFFD32F2F))),
+          if ([_sigs['prepared'], _sigs['acknowledged'], _sigs['approved']].any((u) => u != null)) ...[
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final e in {'Disusun': _sigs['prepared'], 'Diketahui': _sigs['acknowledged'], 'Disetujui': _sigs['approved']}.entries)
+                if (e.value != null)
+                  Container(
+                    width: 110,
+                    padding: const EdgeInsets.all(4),
+                    color: Colors.white,
+                    child: Column(children: [
+                      SizedBox(height: 44, child: Image.network(_api.abs(e.value as String), fit: BoxFit.contain)),
+                      Text(e.key, style: const TextStyle(fontSize: 11, color: Colors.black87)),
+                    ]),
+                  ),
+            ]),
+          ],
+          if (!_hasSignature && [_actions['submit'], _actions['acknowledge'], _actions['approve']].contains(true))
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('⚠ Anda belum mengunggah tanda tangan digital. Anda akan diminta membuatnya saat menandatangani.',
+                  style: TextStyle(color: Color(0xFFD32F2F), fontSize: 12)),
+            ),
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: [
             if (_actions['submit'] == true)

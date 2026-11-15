@@ -1,6 +1,10 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+
+import '../services/api.dart';
+import 'common.dart';
 
 /// Kotak tanda tangan: digambar dengan jari/stylus/mouse, diekspor sebagai PNG transparan.
 class SignaturePadDialog extends StatefulWidget {
@@ -92,4 +96,95 @@ class _SigPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_SigPainter old) => true;
+}
+
+/// Minta user membuat/mengunggah tanda tangan. Mengembalikan URL tanda tangan baru, atau null bila batal.
+Future<String?> promptSignature(BuildContext context, {String? reason}) async {
+  final choice = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Tanda tangan digital'),
+      content: Text(reason ??
+          'Tanda tangan dipakai pada lembar persetujuan laporan. Gambar langsung, atau unggah foto/scan '
+              'tanda tangan dengan tinta gelap di kertas putih (latar putih otomatis dibuat transparan).'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+        OutlinedButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'upload'), icon: const Icon(Icons.upload_file), label: const Text('Unggah gambar')),
+        FilledButton.icon(onPressed: () => Navigator.pop(ctx, 'draw'), icon: const Icon(Icons.draw), label: const Text('Gambar')),
+      ],
+    ),
+  );
+  if (choice == null || !context.mounted) return null;
+  List<int>? bytes;
+  String filename = 'ttd.png';
+  if (choice == 'draw') {
+    bytes = await showDialog<List<int>>(context: context, builder: (_) => const SignaturePadDialog());
+  } else {
+    final x = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (x != null) {
+      bytes = await x.readAsBytes();
+      filename = x.name;
+    }
+  }
+  if (bytes == null) return null;
+  try {
+    final r = await Api.instance.upload('/hse-reports/me/signature', [(field: 'file', filename: filename, bytes: bytes)]);
+    if (context.mounted) showSnack(context, 'Tanda tangan disimpan');
+    return r['url'] as String?;
+  } catch (e) {
+    if (context.mounted) showSnack(context, e.toString(), error: true);
+    return null;
+  }
+}
+
+/// Kartu tanda tangan di Profil.
+class SignatureCard extends StatefulWidget {
+  const SignatureCard({super.key});
+  @override
+  State<SignatureCard> createState() => _SignatureCardState();
+}
+
+class _SignatureCardState extends State<SignatureCard> {
+  String? _url;
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Api.instance.get('/hse-reports/me/signature').then((r) {
+      if (mounted) setState(() { _url = r['url'] as String?; _loaded = true; });
+    }).catchError((_) {});
+  }
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Text('Tanda tangan digital', style: TextStyle(fontWeight: FontWeight.w600)),
+            const Text('Wajib untuk mengirim, mengetahui, atau menyetujui laporan K3.', style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 8),
+            Container(
+              height: 90,
+              color: Colors.white,
+              alignment: Alignment.center,
+              child: !_loaded
+                  ? const SizedBox()
+                  : _url == null
+                      ? const Text('Belum ada tanda tangan', style: TextStyle(color: Colors.red))
+                      : Image.network(Api.instance.abs(_url), fit: BoxFit.contain),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final url = await promptSignature(context);
+                if (url != null) setState(() => _url = url);
+              },
+              icon: const Icon(Icons.draw),
+              label: Text(_url == null ? 'Buat / unggah tanda tangan' : 'Ganti tanda tangan'),
+            ),
+          ]),
+        ),
+      );
 }

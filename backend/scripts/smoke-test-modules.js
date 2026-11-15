@@ -158,6 +158,30 @@ function expect(name, cond, info) {
   expect('anggota tim otomatis dari absensi + pengaturan', full.members.some((m) => m.source === 'attendance') && full.members.some((m) => m.name === 'Operator Satu'), full.members);
   expect('nomor laporan otomatis dari format', /^\d{3}\/HSE\.LH\/[IVX]+\/\d{4}$/.test(full.report.reportNo), full.report.reportNo);
 
+  // Tanda tangan digital wajib
+  const noSig = await call('POST', `/api/hse-reports/${rid}/submit`, { token: ho });
+  expect('kirim tanpa tanda tangan ditolak (422 SIGNATURE_REQUIRED)', noSig.status === 422 && noSig.body.code === 'SIGNATURE_REQUIRED', noSig.body);
+  // Foto tanda tangan di kertas putih -> latar dibuat transparan
+  const sigJpg = await sharp({ create: { width: 600, height: 200, channels: 3, background: '#f4f4f0' } })
+    .composite([{ input: Buffer.from('<svg width="600" height="200"><path d="M40 150 C 120 20, 200 180, 300 80 S 480 60, 560 140" stroke="#102a6b" stroke-width="8" fill="none"/></svg>') }])
+    .jpeg().toBuffer();
+  const uploadSig = async (token) => {
+    const f = new FormData();
+    f.append('file', new Blob([sigJpg], { type: 'image/jpeg' }), 'ttd.jpg');
+    return call('POST', '/api/hse-reports/me/signature', { token, form: f });
+  };
+  const blank = new FormData();
+  blank.append('file', new Blob([await sharp({ create: { width: 300, height: 100, channels: 3, background: '#fff' } }).png().toBuffer()], { type: 'image/png' }), 'kosong.png');
+  const blankUp = await call('POST', '/api/hse-reports/me/signature', { token: ho, form: blank });
+  expect('tanda tangan kosong (kertas putih) ditolak 400', blankUp.status === 400, blankUp.body);
+  const s1 = await uploadSig(ho);
+  expect('HSE Officer unggah tanda tangan', s1.status === 200 && s1.body.url, s1.body);
+  const sigImg = await fetch(BASE + s1.body.url);
+  const sigMeta = await sharp(Buffer.from(await sigImg.arrayBuffer())).metadata();
+  const sigStats = await sharp(Buffer.from(await (await fetch(BASE + s1.body.url)).arrayBuffer())).stats();
+  expect('latar tanda tangan transparan (PNG ber-alpha)', sigMeta.format === 'png' && sigMeta.hasAlpha && sigStats.channels[3].min === 0, sigMeta);
+  await uploadSig(sm);
+
   const ackEarly = await call('POST', `/api/hse-reports/${rid}/acknowledge`, { token: sm });
   expect('diketahui sebelum dikirim ditolak 403', ackEarly.status === 403);
   const sub = await call('POST', `/api/hse-reports/${rid}/submit`, { token: ho });
@@ -172,13 +196,31 @@ function expect(name, cond, info) {
   expect('kirim ulang setelah revisi', sub2.status === 200);
   const ack = await call('POST', `/api/hse-reports/${rid}/acknowledge`, { token: sm });
   expect('Site Manager (PIC Site) mengetahui', ack.status === 200, ack.body);
+  const apNoSig = await call('POST', `/api/hse-reports/${rid}/approve`, { token: hm });
+  expect('HSE Manager tanpa tanda tangan tidak bisa approve (422)', apNoSig.status === 422 && apNoSig.body.code === 'SIGNATURE_REQUIRED');
+  await uploadSig(hm);
   const ap = await call('POST', `/api/hse-reports/${rid}/approve`, { token: hm });
   expect('HSE Manager menyetujui', ap.status === 200, ap.body);
+  const signedRep = (await call('GET', `/api/hse-reports/${rid}`, { token: hm })).body;
+  const frozen = signedRep.signatures.approved.split('?')[0];
+  expect('tanda tangan tersimpan pada laporan (3 penanda tangan)', ['prepared', 'acknowledged', 'approved'].every((k) => signedRep.signatures[k]), signedRep.signatures);
+  await uploadSig(hm); // ganti tanda tangan setelah approve
+  const after = (await call('GET', `/api/hse-reports/${rid}`, { token: hm })).body;
+  expect('ganti tanda tangan tidak mengubah laporan yang sudah disetujui', after.signatures.approved.split('?')[0] === frozen);
+
+  // Logo perusahaan
+  const logo = await sharp({ create: { width: 400, height: 160, channels: 4, background: '#1e5aa8' } }).png().toBuffer();
+  const lf = new FormData();
+  lf.append('file', new Blob([logo], { type: 'image/png' }), 'logo.png');
+  const lup = await call('POST', `/api/hse-reports/settings/${site.id}/image/logoL`, { token: hm, form: lf });
+  expect('unggah logo kiri', lup.status === 200 && lup.body.settings.imgUrl.logoL, lup.body);
 
   const link = await call('POST', `/api/hse-reports/${rid}/print-link`, { token: ho, body: { lang: 'en' } });
   const html = await (await fetch(BASE + link.body.url)).text();
   expect('dokumen cetak berisi bagian A-J', ['A. PROJECT INFORMATION', 'E. WORK ACTIVITIES', 'F. INCIDENT', 'G. CUMULATIVE HSE STATISTICS', 'J. APPROVAL', 'EXCAVATION WORKS', 'WEATHER MONITORING'].every((s) => html.includes(s)));
   expect('dokumen disetujui tanpa watermark DRAF', !html.includes('class="draft"'));
+  expect('logo perusahaan tampil di kop', /class="lg"><img src="\/api\/files\/settings\//.test(html));
+  expect('3 tanda tangan tampil di lembar persetujuan', (html.match(/\/api\/files\/signatures\//g) || []).length >= 3);
   const badPrint = await fetch(`${BASE}/api/hse-reports/${rid}/print?t=palsu`);
   expect('cetak tanpa token valid ditolak 401', badPrint.status === 401);
   if (process.env.PRINT_OUT) require('fs').writeFileSync(process.env.PRINT_OUT, `${BASE}${link.body.url}`);

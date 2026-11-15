@@ -62,6 +62,39 @@ async function saveImage(kind, buffer, { maxSize = 1600, format = 'jpeg' } = {})
   return name;
 }
 
+/**
+ * Tanda tangan: latar putih/terang (foto/scan kertas) dibuat transparan,
+ * dipotong rapat ke goresan, disimpan sebagai PNG.
+ */
+async function saveSignature(buffer) {
+  let out;
+  try {
+    const { data, info } = await sharp(buffer, { failOn: 'error', limitInputPixels: 40e6 })
+      .rotate()
+      .resize({ width: 900, height: 400, fit: 'inside', withoutEnlargement: true })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    let ink = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      if (lum > 190 || data[i + 3] < 30) data[i + 3] = 0; else ink++;
+    }
+    if (ink < 50) throw new Error('kosong');
+    out = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })
+      .trim({ threshold: 1 })
+      .png({ compressionLevel: 9 })
+      .toBuffer();
+  } catch (err) {
+    throw badRequest(err.message === 'kosong'
+      ? 'Tanda tangan tidak terbaca. Gunakan tinta gelap di atas kertas putih, atau gambar langsung di aplikasi.'
+      : 'File gambar rusak atau formatnya tidak didukung');
+  }
+  const name = `${crypto.randomUUID()}.png`;
+  await fs.promises.writeFile(path.join(dirFor('signatures'), name), out, { mode: 0o640 });
+  return name;
+}
+
 function filePath(kind, name) {
   if (!/^[0-9a-f-]{36}\.(jpg|png)$/.test(name || '')) return null; // cegah path traversal
   return path.join(UPLOAD_DIR, kind, name);
@@ -96,4 +129,4 @@ function verify(token, purpose) {
   }
 }
 
-module.exports = { upload, saveImage, filePath, removeFile, signFile, signPrint, verify, exifTime, UPLOAD_DIR };
+module.exports = { upload, saveImage, saveSignature, filePath, removeFile, signFile, signPrint, verify, exifTime, UPLOAD_DIR };

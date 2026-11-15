@@ -66,7 +66,10 @@ function buildHtml({ report: h, settings: S, photos, members, weather, signature
   while (insp.length < 2) insp.push('');
   const img = (src, alt = '') => (src ? `<img src="${esc(src)}" alt="${esc(alt)}">` : '');
 
-  const hdr = () => `<table class="hd"><tr><td class="lg">${img(S.imgUrl.logoL)}</td>
+  // Tanpa logo: tampilkan nama kontraktor sebagai teks (sama seperti format laporan lama).
+  const conText = String(S.con || '').replace(/^PT\.?\s*/i, '').split(' ')[0].toUpperCase();
+  const logoL = S.imgUrl.logoL ? img(S.imgUrl.logoL) : `<span class="lgtx">${esc(conText)}</span>`;
+  const hdr = () => `<table class="hd"><tr><td class="lg">${logoL}</td>
     <td class="ttl">${esc(S.head).replace(/ \(/, '<br>(')}</td><td class="lg">${img(S.imgUrl.logoR)}</td></tr>
     <tr><td colspan="3" class="sub"><b>${t('TITLE')}</b>: ${t('DAILY WORK REPORT')}<div class="l2">${esc(S.title)}</div></td></tr></table><div class="gap"></div>`;
 
@@ -220,7 +223,7 @@ body{margin:0;background:#E5E7EB;font-family:Calibri,Carlito,Arial,sans-serif}
 table{border-collapse:collapse;width:100%}
 td,th{border:1px solid #000;padding:3px 6px;vertical-align:top;text-align:left}
 th{background:#D9D9D9;text-align:center;font-weight:700}
-.hd td{vertical-align:middle}.hd .lg{width:126px;height:66px;text-align:center}.hd .lg img{max-width:110px;max-height:52px;object-fit:contain}
+.hd td{vertical-align:middle}.hd .lg{width:126px;height:66px;text-align:center}.hd .lg img{max-width:110px;max-height:52px;object-fit:contain}.hd .lgtx{font-weight:700;font-size:15px;color:#2A8DB7}
 .hd .ttl{text-align:center;font-family:Georgia,"Bookman Old Style",serif;font-weight:700;font-size:14.5px;line-height:1.35}
 .hd .sub{font-family:Georgia,serif;font-weight:700;font-size:11px;padding:2px 6px}.hd .sub b{display:inline-block;width:84px}.hd .sub .l2{padding-left:94px}
 .gap{height:18px}.k{font-weight:700;width:100px}.kk{font-weight:700;width:195px}.sec{font-weight:700;margin:16px 0 6px}.ct{text-align:center}

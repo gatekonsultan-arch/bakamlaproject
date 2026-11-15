@@ -47,9 +47,9 @@ const HEADER = `
   SELECT h.id, h.site_id, s.name AS site_name, TO_CHAR(h.report_date, 'YYYY-MM-DD') AS report_date,
          h.report_no, h.status, h.start_time, h.finish_time, h.category, h.subject, h.content,
          h.created_by, cu.full_name AS created_by_name, h.updated_at,
-         h.submitted_by, su.full_name AS submitted_by_name, su.signature_file AS submitted_sig, h.submitted_at,
-         h.acknowledged_by, au.full_name AS acknowledged_by_name, au.signature_file AS acknowledged_sig, h.acknowledged_at,
-         h.approved_by, pu.full_name AS approved_by_name, pu.signature_file AS approved_sig, h.approved_at,
+         h.submitted_by, su.full_name AS submitted_by_name, h.submitted_sig, h.submitted_at,
+         h.acknowledged_by, au.full_name AS acknowledged_by_name, h.acknowledged_sig, h.acknowledged_at,
+         h.approved_by, pu.full_name AS approved_by_name, h.approved_sig, h.approved_at,
          h.revision_note
     FROM hse_reports h
     JOIN sites s ON s.id = h.site_id
@@ -204,10 +204,9 @@ router.get('/me/signature', async (req, res) => {
 
 router.post('/me/signature', files.upload.single('file'), async (req, res) => {
   if (!req.file) throw badRequest('File tanda tangan wajib diunggah');
-  const name = await files.saveImage('signatures', req.file.buffer, { maxSize: 600, format: 'png' });
-  const old = await db.one('SELECT signature_file FROM users WHERE id = :id', { id: req.user.id });
+  const name = await files.saveSignature(req.file.buffer);
+  // File lama TIDAK dihapus: masih dipakai laporan yang sudah ditandatangani.
   await db.query('UPDATE users SET signature_file = :f WHERE id = :id', { f: name, id: req.user.id });
-  if (old.signatureFile) await files.removeFile('signatures', old.signatureFile);
   await audit(req.user.id, 'SIGNATURE_UPDATE', null, req.ip);
   res.json({ url: files.signFile('signatures', name) });
 });
@@ -351,6 +350,12 @@ router.get('/:id', async (req, res) => {
     members: await loadMembers(h, settings),
     settings: settingsDto(settings),
     actions: actionsFor(req.user, h),
+    hasSignature: !!(await db.one('SELECT signature_file FROM users WHERE id = :id', { id: req.user.id })).signatureFile,
+    signatures: {
+      prepared: files.signFile('signatures', h.submittedSig),
+      acknowledged: files.signFile('signatures', h.acknowledgedSig),
+      approved: files.signFile('signatures', h.approvedSig),
+    },
   });
 });
 
@@ -488,6 +493,16 @@ router.delete('/:id/photos/:photoId', requirePermission('writeHseReports'), asyn
 });
 
 // ------------------------------------------------------------------ alur persetujuan
+/** Penanda tangan wajib sudah mengunggah tanda tangan digital. */
+async function requireSignature(user) {
+  const u = await db.one('SELECT signature_file FROM users WHERE id = :id', { id: user.id });
+  if (!u || !u.signatureFile) {
+    throw unprocessable('Anda belum mengunggah tanda tangan digital. Unggah tanda tangan di menu Profil terlebih dahulu.',
+      { code: 'SIGNATURE_REQUIRED' });
+  }
+  return u.signatureFile;
+}
+
 async function transition(reportId, from, sets, binds) {
   const r = await db.query(
     `UPDATE hse_reports SET ${sets}, updated_at = SYSTIMESTAMP WHERE id = :id AND status IN (${from.map((s) => `'${s}'`).join(',')})`,
@@ -505,9 +520,12 @@ router.post('/:id/submit', requirePermission('writeHseReports'), async (req, res
   if (h.content.incident.occurred && !h.content.incident.desc.trim()) {
     throw unprocessable('Uraian insiden wajib diisi karena laporan menyatakan ada insiden');
   }
+  const sig = await requireSignature(req.user);
   await transition(reportId, ['DRAFT', 'REVISION'],
-    'status = \'SUBMITTED\', submitted_by = :u, submitted_at = SYSTIMESTAMP, acknowledged_by = NULL, acknowledged_at = NULL, approved_by = NULL, approved_at = NULL',
-    { u: req.user.id });
+    `status = 'SUBMITTED', submitted_by = :u, submitted_at = SYSTIMESTAMP, submitted_sig = :sig,
+     acknowledged_by = NULL, acknowledged_at = NULL, acknowledged_sig = NULL,
+     approved_by = NULL, approved_at = NULL, approved_sig = NULL`,
+    { u: req.user.id, sig });
   await audit(req.user.id, 'HSE_REPORT_SUBMIT', `id=${reportId}`, req.ip);
   res.json({ message: 'Laporan dikirim ke PIC Site untuk diketahui' });
 });
@@ -517,7 +535,10 @@ router.post('/:id/acknowledge', requirePermission('acknowledgeHseReports'), asyn
   const h = await loadReport(reportId);
   assertSiteAccess(req.user, h.siteId);
   if (!actionsFor(req.user, h).acknowledge) throw forbidden('Anda tidak dapat memproses laporan ini');
-  await transition(reportId, ['SUBMITTED'], 'status = \'ACKNOWLEDGED\', acknowledged_by = :u, acknowledged_at = SYSTIMESTAMP', { u: req.user.id });
+  const sig = await requireSignature(req.user);
+  await transition(reportId, ['SUBMITTED'],
+    "status = 'ACKNOWLEDGED', acknowledged_by = :u, acknowledged_at = SYSTIMESTAMP, acknowledged_sig = :sig",
+    { u: req.user.id, sig });
   await audit(req.user.id, 'HSE_REPORT_ACKNOWLEDGE', `id=${reportId}`, req.ip);
   res.json({ message: 'Laporan diketahui, diteruskan ke HSE Manager' });
 });
@@ -527,7 +548,10 @@ router.post('/:id/approve', requirePermission('approveHseReports'), async (req, 
   const h = await loadReport(reportId);
   assertSiteAccess(req.user, h.siteId);
   if (!actionsFor(req.user, h).approve) throw forbidden('Anda tidak dapat menyetujui laporan ini');
-  await transition(reportId, ['ACKNOWLEDGED'], 'status = \'APPROVED\', approved_by = :u, approved_at = SYSTIMESTAMP', { u: req.user.id });
+  const sig = await requireSignature(req.user);
+  await transition(reportId, ['ACKNOWLEDGED'],
+    "status = 'APPROVED', approved_by = :u, approved_at = SYSTIMESTAMP, approved_sig = :sig",
+    { u: req.user.id, sig });
   await audit(req.user.id, 'HSE_REPORT_APPROVE', `id=${reportId}`, req.ip);
   res.json({ message: 'Laporan disetujui' });
 });
