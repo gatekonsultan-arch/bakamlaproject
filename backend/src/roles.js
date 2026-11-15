@@ -46,6 +46,11 @@ const PERMISSIONS = Object.freeze({
   submitPayroll: [R.SUPERADMIN, R.SITE_MANAGER],
   approvePayroll: [R.SUPERADMIN, R.PROJECT_MANAGER],
   markPayrollPaid: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER],
+
+  // ATP Checklist (mutu pekerjaan struktur)
+  viewAtp: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER],
+  writeAtp: [R.SUPERADMIN, R.SITE_MANAGER],
+  approveAtp: [R.SUPERADMIN, R.PROJECT_MANAGER],
 });
 
 /** Role yang aksesnya dibatasi ke lokasi (site) miliknya bila user ditugaskan ke satu site. */

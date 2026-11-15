@@ -4,7 +4,8 @@ Aplikasi proyek konstruksi dengan tiga modul:
 1. **Absensi geotagging + selfie wajah**: check-in/out hanya sah di dalam radius lokasi kerja dan dengan selfie berisi tepat satu wajah.
 2. **Laporan Harian K3**: disusun HSE Officer, diketahui PIC Site, disetujui HSE Manager, lalu dicetak ke PDF A4. Contoh hasil: [docs/contoh-laporan-harian-k3.pdf](docs/contoh-laporan-harian-k3.pdf)
 3. **Tenaga kerja harian & rekap upah mingguan**: tukang, mandor, buruh diabsen Site Manager di lokasi (hadir / ½ hari / tidak masuk + lembur), kasbon dipotong, rekap Senin–Sabtu disetujui PM. Contoh: [docs/contoh-rekap-upah-mingguan.pdf](docs/contoh-rekap-upah-mingguan.pdf)
-4. **Kontrol material logistik**: kebutuhan → permintaan pembelian → approval → pemesanan → penerimaan → pemakaian, dengan **penanda kuning/merah** otomatis.
+4. **ATP Checklist (mutu pekerjaan struktur)**: Site Manager memeriksa ukuran DED vs aktual per item (fondasi, pembesian, kolom, balok, plat), PM menyetujui, lalu dicetak untuk ditandatangani Inspektur/pengawas.
+5. **Kontrol material logistik**: kebutuhan → permintaan pembelian → approval → pemesanan → penerimaan → pemakaian, dengan **penanda kuning/merah** otomatis.
 
 Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpan di **Oracle Database**.
 
@@ -19,7 +20,7 @@ Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpa
 
 | Folder      | Isi |
 |-------------|-----|
-| `database/` | Skema Oracle: absensi (01), role (02), material (03), laporan K3 (04), tanda tangan (05), tenaga kerja & upah (06) |
+| `database/` | Skema Oracle: absensi (01), role (02), material (03), laporan K3 (04), tanda tangan (05), tenaga kerja & upah (06), selfie (07), material submission & ATP (08) |
 | `backend/`  | REST API (Node.js, Express, node-oracledb mode *thin* — tanpa Instant Client) |
 | `mobile/`   | Aplikasi Flutter (web + Android + iOS) |
 | `deploy/`   | Docker Compose (Oracle + API), konfigurasi Nginx, skrip backup |
@@ -46,6 +47,9 @@ Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpa
 | **Tenaga kerja:** kasbon | ✓ | ✓ | – | site-nya | – | – | – |
 | **Tenaga kerja:** setujui rekap upah | ✓ | – | ✓ | – | – | – | – |
 | **Tenaga kerja:** tandai sudah dibayar | ✓ | ✓ | ✓ | – | – | – | – |
+| **ATP:** lihat & cetak | ✓ | ✓ | ✓ | site-nya | – | – | – |
+| **ATP:** menyusun & mengirim | ✓ | – | – | site-nya | – | – | – |
+| **ATP:** menyetujui | ✓ | – | ✓ | – | – | – | – |
 
 Hak akses diperiksa **di server** (`backend/src/roles.js`); menu di aplikasi hanya tampilan.
 Site Manager, HSE Officer, dan Logistik yang ditugaskan ke satu lokasi hanya bisa mengakses data lokasinya.
@@ -64,6 +68,24 @@ Logikanya ada di `backend/src/utils/materialStatus.js` dan diuji di `backend/tes
 
 Saat Logistik mengajukan pembelian, Project Manager melihat **proyeksi** sebelum menyetujui, misalnya
 "Jika disetujui, pengadaan menjadi 116,7%, melebihi kebutuhan sebesar 10".
+
+## Persetujuan merek/spesifikasi material (Material Purchase Submission & Approval)
+
+Formulir *Material Purchase Submission & Approval* menyatu dengan alur **Pembelian**:
+- Logistik mengajukan pembelian beserta **merek**, **tipe/spesifikasi**, dan **foto label material** per item, plus paket/kategori.
+- PM memutuskan **per item**: Setujui, atau Tolak dengan **alasan wajib**. Permintaan berstatus *Disetujui* bila ada item yang disetujui, dan hanya item itu yang boleh dipesan dan diterima. Item yang ditolak tidak dihitung dalam pengadaan atau penanda ambang batas. Bila semua item ditolak, statusnya *Ditolak*.
+- PM wajib punya tanda tangan digital untuk memutuskan. Tombol 🖨 mencetak formulir sesuai format proyek (kop PRIMA/SRT, ☑ Approve/☑ Reject per item, tanda tangan *Submitted by* dan *Approved by*).
+
+## ATP Checklist (Acceptance Test Procedure)
+
+- **Site Manager** membuat ATP per area pekerjaan dan memilih jenis pekerjaannya. Daftar item standar A–E
+  (`backend/src/reports/atpLibrary.js`) tersalin otomatis dan bisa diubah, ditambah, atau dihapus.
+- Per item diisi ukuran **DED (rencana)**, **aktual (as-built)**, **toleransi**, keterangan, dan foto.
+  **Saran hasil otomatis**: APPROVE bila selisih masih dalam toleransi, selain itu REJECT. Format yang dipahami: ±10, +10/-5, 5%
+  (`backend/src/utils/tolerance.js`). Pemeriksa tetap memilih sendiri, dan pemeriksaan visual dinilai manual.
+- Item REJECT wajib diberi keterangan perbaikan (*rework*). Dokumen dikirim ke PM, lalu PM **menyetujui** atau **mengembalikan untuk revisi**.
+  Kedua tahap mewajibkan tanda tangan digital.
+- Hasil cetak: tanda tangan PM di kolom **CONTRACTOR**. Kolom **APPROVED BY** dibiarkan kosong untuk **tanda tangan basah Inspektur/pengawas**.
 
 ## Tenaga kerja harian & rekap upah
 
@@ -159,6 +181,7 @@ export TEST_SELFIE=/path/selfie.jpg
 API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test.js           # login & absensi + selfie
 API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-modules.js   # material & laporan K3
 API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-workers.js   # tenaga kerja & rekap upah
+API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-atp.js       # ATP checklist
 ```
 
 ### Izin lokasi di HP (setelah `flutter create`)
@@ -190,6 +213,8 @@ API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-
 | GET/POST/PUT | `/api/materials/catalog`, `/api/materials/plans`, `POST /api/materials/movements`, `GET /api/materials/alerts` | material |
 | GET/POST | `/api/purchase-requests`, `/:id/approve`, `/:id/reject`, `/:id/cancel`, `/:id/order`, `/:id/receive` | material |
 | GET/POST/PUT | `/api/workers`, `/api/workers/attendance`, `/api/workers/attendance/photo`, `/api/workers/advances` | tenaga kerja |
+| GET/POST/PUT | `/api/atp`, `/api/atp/meta`, `/:id/items/:itemId/photo`, `/:id/submit`, `/:id/approve`, `/:id/return`, `/:id/print-link` | ATP |
+| POST | `/api/purchase-requests/:id/decide`, `/:id/items/:itemId/photo`, `/:id/print-link` | material submission |
 | GET/POST | `/api/workers/payroll`, `/payroll/weeks`, `/payroll/submit`, `/payroll/approve`, `/payroll/return`, `/payroll/paid`, `/payroll/link` | rekap upah |
 | GET/POST/PUT/DELETE | `/api/hse-reports`, `/:id/photos`, `/:id/submit`, `/:id/acknowledge`, `/:id/approve`, `/:id/return`, `/:id/print-link`, `/settings/:siteId` | laporan K3 |
 

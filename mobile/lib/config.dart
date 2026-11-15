@@ -43,3 +43,7 @@ bool canViewWorkers(String r) => _in(r, {'SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER
 bool canManageWorkers(String r) => canViewWorkers(r);
 bool canRecordWorkerAttendance(String r) => _in(r, {'SUPERADMIN', 'SITE_MANAGER'});
 bool canRecordCashAdvance(String r) => _in(r, {'SUPERADMIN', 'ADMIN', 'SITE_MANAGER'});
+
+// ATP Checklist (mutu pekerjaan struktur)
+bool canViewAtp(String r) => _in(r, {'SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'SITE_MANAGER'});
+bool canWriteAtp(String r) => _in(r, {'SUPERADMIN', 'SITE_MANAGER'});

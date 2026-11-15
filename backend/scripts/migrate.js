@@ -11,8 +11,8 @@ require('dotenv').config();
 
 const SQL_DIR = process.env.SQL_DIR || path.join(__dirname, '..', '..', 'database');
 // ORA-00955 nama sudah dipakai, ORA-01408 index sudah ada, ORA-00001 data duplikat,
-// ORA-02275 constraint sudah ada, ORA-01430 kolom sudah ada
-const IGNORABLE = new Set([955, 1408, 1, 2275, 1430]);
+// ORA-02275 constraint sudah ada, ORA-01430 kolom sudah ada, ORA-02264 nama constraint sudah dipakai
+const IGNORABLE = new Set([955, 1408, 1, 2275, 1430, 2264]);
 
 function splitStatements(sql) {
   return sql

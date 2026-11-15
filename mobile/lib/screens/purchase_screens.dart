@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../config.dart';
 import '../main.dart';
 import '../services/api.dart';
 import '../widgets/common.dart';
 import '../widgets/level.dart';
+import '../widgets/signature_pad.dart';
 import '../widgets/site_picker.dart';
 import 'materials_screen.dart' show fmtQty;
 
@@ -152,7 +155,10 @@ class _CreatePurchaseScreenState extends State<CreatePurchaseScreen> {
   List<Map<String, dynamic>> _plans = [];
   final Map<int, TextEditingController> _qty = {};
   final Map<int, TextEditingController> _price = {};
+  final Map<int, TextEditingController> _brand = {};
+  final Map<int, TextEditingController> _spec = {};
   final _note = TextEditingController();
+  final _category = TextEditingController();
   bool _busy = false;
 
   Future<void> _loadPlans() async {
@@ -177,13 +183,20 @@ class _CreatePurchaseScreenState extends State<CreatePurchaseScreen> {
       final q = double.tryParse((_qty[p['id']]?.text ?? '').replaceAll(',', '.'));
       if (q != null && q > 0) {
         final price = double.tryParse((_price[p['id']]?.text ?? '').replaceAll('.', '').replaceAll(',', '.'));
-        items.add({'siteMaterialId': p['id'], 'qty': q, if (price != null) 'unitPrice': price});
+        items.add({
+          'siteMaterialId': p['id'],
+          'qty': q,
+          if (price != null) 'unitPrice': price,
+          'brand': _brand[p['id']]?.text ?? '',
+          'spec': _spec[p['id']]?.text ?? '',
+        });
       }
     }
     if (items.isEmpty) return showSnack(context, 'Isi jumlah minimal satu material', error: true);
     setState(() => _busy = true);
     try {
-      final r = await Api.instance.post('/purchase-requests', {'siteId': _siteId, 'note': _note.text, 'items': items});
+      final r = await Api.instance.post('/purchase-requests',
+          {'siteId': _siteId, 'note': _note.text, 'category': _category.text, 'items': items});
       if (!mounted) return;
       final warn = (r['items'] as List).where((i) => i['projection']?['level'] == 'RED').toList();
       Navigator.pop(context, true);
@@ -220,6 +233,12 @@ class _CreatePurchaseScreenState extends State<CreatePurchaseScreen> {
             }),
             const SizedBox(height: 8),
             TextField(controller: _note, decoration: const InputDecoration(labelText: 'Keperluan / catatan')),
+            TextField(
+                controller: _category,
+                decoration: const InputDecoration(labelText: 'Paket / kategori material (mis. Struktur, Finishing)')),
+            const SizedBox(height: 4),
+            const Text('Isi merek & spesifikasi agar PM bisa menyetujui per item. Foto label material dapat ditambahkan '
+                'setelah permintaan dibuat (buka detail permintaan).', style: TextStyle(fontSize: 12)),
             const SizedBox(height: 16),
             Text('Isi jumlah pada material yang akan dibeli:', style: Theme.of(context).textTheme.titleSmall),
             if (_plans.isEmpty)
@@ -255,6 +274,23 @@ class _CreatePurchaseScreenState extends State<CreatePurchaseScreen> {
                         ),
                       ),
                     ]),
+                    if ((double.tryParse((_qty[p['id']]?.text ?? '').replaceAll(',', '.')) ?? 0) > 0)
+                      Row(children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _brand.putIfAbsent(p['id'] as int, TextEditingController.new),
+                            decoration: const InputDecoration(labelText: 'Merek'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: TextField(
+                            controller: _spec.putIfAbsent(p['id'] as int, TextEditingController.new),
+                            decoration: const InputDecoration(labelText: 'Tipe / spesifikasi'),
+                          ),
+                        ),
+                      ]),
                     Builder(builder: (_) {
                       final q = double.tryParse((_qty[p['id']]?.text ?? '').replaceAll(',', '.')) ?? 0;
                       if (q <= 0) return const SizedBox.shrink();
@@ -287,6 +323,49 @@ class PurchaseDetailScreen extends StatefulWidget {
 class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
   Map<String, dynamic>? _data;
   bool _busy = false;
+  // Keputusan PM per item: itemId -> 'APPROVE' | 'REJECT'
+  final Map<int, String> _decision = {};
+  final Map<int, TextEditingController> _reason = {};
+
+  Future<void> _decide() async {
+    final items = (_data!['items'] as List).cast<Map<String, dynamic>>();
+    final missing = items.where((i) => _decision[i['id']] == null).length;
+    if (missing > 0) return showSnack(context, 'Pilih Setujui/Tolak untuk $missing item lagi', error: true);
+    final noReason = items.where((i) => _decision[i['id']] == 'REJECT' && (_reason[i['id']]?.text.trim() ?? '').isEmpty);
+    if (noReason.isNotEmpty) return showSnack(context, 'Isi alasan penolakan: ${noReason.first['name']}', error: true);
+    await _act('decide', {
+      'items': [
+        for (final i in items)
+          {'itemId': i['id'], 'decision': _decision[i['id']], 'note': _reason[i['id']]?.text.trim() ?? ''},
+      ],
+    });
+  }
+
+  Future<void> _photo(Map<String, dynamic> item) async {
+    XFile? x;
+    try {
+      x = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 2000);
+    } catch (_) {
+      x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 2000);
+    }
+    if (x == null) return;
+    try {
+      await Api.instance.upload('/purchase-requests/${widget.id}/items/${item['id']}/photo',
+          [(field: 'photo', filename: x.name, bytes: await x.readAsBytes())]);
+      await _load();
+    } catch (e) {
+      if (mounted) showSnack(context, e.toString(), error: true);
+    }
+  }
+
+  Future<void> _print() async {
+    try {
+      final r = await Api.instance.post('/purchase-requests/${widget.id}/print-link', {});
+      await launchUrl(Uri.parse(Api.instance.abs(r['url'] as String)), webOnlyWindowName: '_blank');
+    } catch (e) {
+      if (mounted) showSnack(context, e.toString(), error: true);
+    }
+  }
 
   @override
   void initState() {
@@ -309,6 +388,16 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
       final r = await Api.instance.post('/purchase-requests/${widget.id}/$action', body ?? {});
       if (mounted) showSnack(context, r['message'] as String? ?? 'Berhasil');
       await _load();
+    } on ApiException catch (e) {
+      if (e.data['code'] == 'SIGNATURE_REQUIRED' && mounted) {
+        final url = await promptSignature(context, reason: e.message);
+        if (url != null) {
+          if (mounted) setState(() => _busy = false);
+          return _act(action, body);
+        }
+      } else if (mounted) {
+        showSnack(context, e.message, error: true);
+      }
     } catch (e) {
       if (mounted) showSnack(context, e.toString(), error: true);
     } finally {
@@ -408,7 +497,9 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
     final a = d['actions'] as Map<String, dynamic>;
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: Text('${r['requestNo']}')),
+      appBar: AppBar(title: Text('${r['requestNo']}'), actions: [
+        IconButton(tooltip: 'Cetak formulir Material Submission', onPressed: _print, icon: const Icon(Icons.print)),
+      ]),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         Constrained(
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -420,6 +511,7 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
             const SizedBox(height: 8),
             Text('Diajukan oleh ${r['requestedByName']}'),
             if (r['note'] != null) Text('Keperluan: ${r['note']}'),
+            if (r['category'] != null) Text('Paket/kategori: ${r['category']}'),
             if (r['decidedByName'] != null)
               Text('${r['status'] == 'REJECTED' ? 'Ditolak' : 'Disetujui'} oleh ${r['decidedByName']}'
                   '${r['decisionNote'] != null ? ': ${r['decisionNote']}' : ''}'),
@@ -437,6 +529,53 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
                     if (i['unitPrice'] != null)
                       Text('${_rp.format(i['unitPrice'])} / ${i['unit']} = ${_rp.format((i['unitPrice'] as num) * (i['qty'] as num))}'),
                     if ((i['qtyReceived'] as num) > 0) Text('Diterima: ${fmtQty(i['qtyReceived'])} ${i['unit']}'),
+                    if (i['brand'] != null || i['spec'] != null)
+                      Text('Merek: ${i['brand'] ?? '-'} · Spesifikasi: ${i['spec'] ?? '-'}'),
+                    const SizedBox(height: 6),
+                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      if (i['photoUrl'] != null)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.network(Api.instance.abs(i['photoUrl'] as String), width: 96, height: 72, fit: BoxFit.cover),
+                        ),
+                      if (a['uploadPhoto'] == true)
+                        TextButton.icon(
+                          onPressed: () => _photo(i),
+                          icon: const Icon(Icons.add_a_photo, size: 18),
+                          label: Text(i['photoUrl'] == null ? 'Foto label material' : 'Ganti foto'),
+                        ),
+                      const Spacer(),
+                      if (i['itemStatus'] != 'PENDING')
+                        Chip(
+                          label: Text('${i['itemStatusLabel']}'),
+                          backgroundColor: (i['itemStatus'] == 'APPROVED' ? Colors.green : Colors.red).withValues(alpha: 0.12),
+                        ),
+                    ]),
+                    if (i['decisionNote'] != null)
+                      Text('Alasan: ${i['decisionNote']}', style: const TextStyle(color: Color(0xFFD32F2F))),
+                    if (a['decide'] == true) ...[
+                      const SizedBox(height: 6),
+                      SegmentedButton<String>(
+                        emptySelectionAllowed: true,
+                        segments: const [
+                          ButtonSegment(value: 'APPROVE', label: Text('Setujui'), icon: Icon(Icons.check)),
+                          ButtonSegment(value: 'REJECT', label: Text('Tolak'), icon: Icon(Icons.close)),
+                        ],
+                        selected: {if (_decision[i['id']] != null) _decision[i['id']]!},
+                        onSelectionChanged: (v) => setState(() {
+                          if (v.isEmpty) {
+                            _decision.remove(i['id'] as int);
+                          } else {
+                            _decision[i['id'] as int] = v.first;
+                          }
+                        }),
+                      ),
+                      if (_decision[i['id']] == 'REJECT')
+                        TextField(
+                          controller: _reason.putIfAbsent(i['id'] as int, TextEditingController.new),
+                          decoration: const InputDecoration(labelText: 'Alasan penolakan / revisi (wajib)'),
+                        ),
+                    ],
                     const SizedBox(height: 6),
                     Text('Kebutuhan ${fmtQty((i['material'] as Map)['plannedQty'])} · sudah diadakan '
                         '${fmtQty((i['material'] as Map)['procured'])} · stok ${fmtQty((i['material'] as Map)['stock'])}',
@@ -460,9 +599,14 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
                 ),
               ),
             const SizedBox(height: 12),
-            if (a['approve'] == true)
+            if (a['decide'] == true) ...[
               FilledButton.icon(
-                  onPressed: _busy ? null : () => _act('approve'), icon: const Icon(Icons.check), label: const Text('Setujui')),
+                  onPressed: _busy ? null : _decide, icon: const Icon(Icons.fact_check), label: const Text('Simpan Keputusan per Item')),
+              TextButton.icon(
+                  onPressed: _busy ? null : () => _act('approve'),
+                  icon: const Icon(Icons.done_all),
+                  label: const Text('Setujui semua item')),
+            ],
             if (a['reject'] == true)
               TextButton.icon(
                 style: TextButton.styleFrom(foregroundColor: cs.error),
@@ -473,7 +617,7 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
                         if (note != null) await _act('reject', {'note': note});
                       },
                 icon: const Icon(Icons.close),
-                label: const Text('Tolak'),
+                label: const Text('Tolak semua item'),
               ),
             if (a['order'] == true)
               FilledButton.icon(onPressed: _busy ? null : _order, icon: const Icon(Icons.local_shipping), label: const Text('Catat Pemesanan')),

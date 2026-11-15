@@ -42,6 +42,11 @@ function expect(name, cond, info) {
   const ho = await mk('HSE_OFFICER');
   const hm = await mk('HSE_MANAGER');
 
+  // Tanda tangan (wajib untuk menyetujui pembelian & laporan)
+  const sigBuf = await sharp({ create: { width: 300, height: 100, channels: 3, background: '#fff' } })
+    .composite([{ input: Buffer.from('<svg width="300" height="100"><path d="M20 70 Q 100 10 160 60 T 280 40" stroke="#123" stroke-width="5" fill="none"/></svg>') }]).png().toBuffer();
+  const giveSig = async (tok) => { const f = new FormData(); f.append('file', new Blob([sigBuf], { type: 'image/png' }), 's.png'); return call('POST', '/api/hse-reports/me/signature', { token: tok, form: f }); };
+
   console.log('\n-- Material');
   const cat = await call('POST', '/api/materials/catalog', { token: pm, body: { code: `SEM-${sfx}`, name: 'Semen Portland 50kg', unit: 'sak', category: 'Struktur' } });
   expect('PM tambah katalog material', cat.status === 201, cat.body);
@@ -68,6 +73,9 @@ function expect(name, cond, info) {
   expect('pesan sebelum approve ditolak (409)', orderEarly.status === 409);
   const rejectNoNote = await call('POST', `/api/purchase-requests/${prId}/reject`, { token: pm, body: {} });
   expect('tolak tanpa alasan ditolak (400)', rejectNoNote.status === 400);
+  const apprNoSig = await call('POST', `/api/purchase-requests/${prId}/approve`, { token: pm, body: { note: 'OK' } });
+  expect('PM tanpa tanda tangan tidak bisa menyetujui (422)', apprNoSig.status === 422 && apprNoSig.body.code === 'SIGNATURE_REQUIRED', apprNoSig.body);
+  await giveSig(pm);
   const appr = await call('POST', `/api/purchase-requests/${prId}/approve`, { token: pm, body: { note: 'OK' } });
   expect('PM approve', appr.status === 200, appr.body);
   const appr2 = await call('POST', `/api/purchase-requests/${prId}/approve`, { token: pm, body: {} });
@@ -106,6 +114,47 @@ function expect(name, cond, info) {
   expect('dashboard penanda berisi material merah', alerts.counts.RED >= 1 && alerts.alerts[0].level === 'RED', alerts.counts);
   const cancel = await call('POST', `/api/purchase-requests/${pr2.body.request.id}/cancel`, { token: lg });
   expect('pembuat bisa batalkan PR yang disetujui', cancel.status === 200, cancel.body);
+
+  console.log('\n-- Material Submission (persetujuan per item)');
+  const cat2 = (await call('POST', '/api/materials/catalog', { token: pm, body: { code: `CAT-${sfx}`, name: 'Cat Tembok Eksterior', unit: 'pail' } })).body.material;
+  const plan2 = (await call('POST', '/api/materials/plans', { token: pm, body: { siteId: site.id, materialId: cat2.id, plannedQty: 20 } })).body.plan;
+  const cat3 = (await call('POST', '/api/materials/catalog', { token: pm, body: { code: `KRM-${sfx}`, name: 'Keramik 40x40', unit: 'dus' } })).body.material;
+  const plan3 = (await call('POST', '/api/materials/plans', { token: pm, body: { siteId: site.id, materialId: cat3.id, plannedQty: 100 } })).body.plan;
+  const msub = await call('POST', '/api/purchase-requests', { token: lg, body: { siteId: site.id, category: 'Finishing',
+    items: [{ siteMaterialId: plan2.id, qty: 10, brand: 'Dulux', spec: 'Weathershield 20L, putih' }, { siteMaterialId: plan3.id, qty: 50, brand: 'Merek X', spec: 'KW2' }] } });
+  expect('Logistik ajukan dengan merek & spesifikasi', msub.status === 201 && msub.body.items[0].brand === 'Dulux' && msub.body.request.category === 'Finishing', msub.body);
+  const subId = msub.body.request.id;
+  const [it1, it2] = msub.body.items;
+  const pfd = new FormData();
+  pfd.append('photo', new Blob([await sharp({ create: { width: 400, height: 300, channels: 3, background: '#2a6' } }).jpeg().toBuffer()], { type: 'image/jpeg' }), 'label.jpg');
+  const ph = await call('POST', `/api/purchase-requests/${subId}/items/${it1.id}/photo`, { token: lg, form: pfd });
+  expect('foto label material per item', ph.status === 200 && ph.body.photoUrl, ph.body);
+  const noReason = await call('POST', `/api/purchase-requests/${subId}/decide`, { token: pm, body: { items: [{ itemId: it1.id, decision: 'APPROVE' }, { itemId: it2.id, decision: 'REJECT' }] } });
+  expect('tolak item tanpa alasan ditolak (400)', noReason.status === 400, noReason.body);
+  const partial = await call('POST', `/api/purchase-requests/${subId}/decide`, { token: pm, body: { items: [{ itemId: it1.id, decision: 'APPROVE' }] } });
+  expect('keputusan harus untuk semua item (400)', partial.status === 400);
+  const dec = await call('POST', `/api/purchase-requests/${subId}/decide`, { token: pm, body: { items: [
+    { itemId: it1.id, decision: 'APPROVE' }, { itemId: it2.id, decision: 'REJECT', note: 'KW2 tidak sesuai spesifikasi, ganti KW1' }] } });
+  expect('PM setujui 1 item, tolak 1 item', dec.status === 200 && dec.body.approved === 1 && dec.body.rejected === 1, dec.body);
+  const sd = (await call('GET', `/api/purchase-requests/${subId}`, { token: lg })).body;
+  expect('status permintaan APPROVED; item ditolak tercatat alasannya', sd.request.status === 'APPROVED'
+    && sd.items.find((i) => i.id === it2.id).itemStatus === 'REJECTED' && /KW1/.test(sd.items.find((i) => i.id === it2.id).decisionNote), sd.items);
+  const p3 = (await call('GET', `/api/materials/plans/${plan3.id}`, { token: pm })).body.plan;
+  expect('item ditolak tidak dihitung sebagai sedang dipesan', p3.onOrder === 0 && p3.pending === 0, p3);
+  const p2 = (await call('GET', `/api/materials/plans/${plan2.id}`, { token: pm })).body.plan;
+  expect('item disetujui dihitung sedang dipesan', p2.onOrder === 10, p2);
+  await call('POST', `/api/purchase-requests/${subId}/order`, { token: lg, body: { supplier: 'Toko Cat' } });
+  const recvRej = await call('POST', `/api/purchase-requests/${subId}/receive`, { token: lg, body: { items: [{ itemId: it2.id, qty: 1 }] } });
+  expect('item ditolak tidak boleh diterima (422)', recvRej.status === 422, recvRej.body);
+  const recvOk = await call('POST', `/api/purchase-requests/${subId}/receive`, { token: lg, body: { items: [{ itemId: it1.id, qty: 10 }] } });
+  expect('item disetujui diterima lengkap -> RECEIVED', recvOk.body.status === 'RECEIVED', recvOk.body);
+  const msaLink = await call('POST', `/api/purchase-requests/${subId}/print-link`, { token: lg });
+  const msa = await (await fetch(BASE + msaLink.body.url)).text();
+  expect('formulir Material Submission tercetak sesuai format', ['MATERIAL PURCHASE SUBMISSION &amp; APPROVAL FORM', 'Dulux', 'Weathershield', 'KW2 tidak sesuai', '☑ Approve', '☑ Reject', 'logo-prima.png', 'logo-srt.png'].every((x) => msa.includes(x)));
+  expect('tanda tangan PM di kolom APPROVED BY', (msa.match(/\/api\/files\/signatures\//g) || []).length >= 1);
+  const allRej = await call('POST', '/api/purchase-requests', { token: lg, body: { siteId: site.id, items: [{ siteMaterialId: plan3.id, qty: 5, brand: 'Y' }] } });
+  await call('POST', `/api/purchase-requests/${allRej.body.request.id}/decide`, { token: pm, body: { items: [{ itemId: allRej.body.items[0].id, decision: 'REJECT', note: 'Merek tidak dikenal' }] } });
+  expect('semua item ditolak -> REJECTED', (await call('GET', `/api/purchase-requests/${allRej.body.request.id}`, { token: lg })).body.request.status === 'REJECTED');
 
   console.log('\n-- Laporan Harian K3');
   // Absen HSE Officer di lokasi -> otomatis jadi anggota tim laporan
