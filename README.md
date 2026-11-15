@@ -3,7 +3,8 @@
 Aplikasi proyek konstruksi dengan tiga modul:
 1. **Absensi geotagging**: check-in/out hanya sah di dalam radius lokasi kerja.
 2. **Laporan Harian K3**: disusun HSE Officer, diketahui PIC Site, disetujui HSE Manager, lalu dicetak ke PDF A4. Contoh hasil: [docs/contoh-laporan-harian-k3.pdf](docs/contoh-laporan-harian-k3.pdf)
-3. **Kontrol material logistik**: kebutuhan → permintaan pembelian → approval → pemesanan → penerimaan → pemakaian, dengan **penanda kuning/merah** otomatis.
+3. **Tenaga kerja harian & rekap upah mingguan**: tukang, mandor, buruh diabsen Site Manager di lokasi (hadir / ½ hari / tidak masuk + lembur), kasbon dipotong, rekap Senin–Sabtu disetujui PM. Contoh: [docs/contoh-rekap-upah-mingguan.pdf](docs/contoh-rekap-upah-mingguan.pdf)
+4. **Kontrol material logistik**: kebutuhan → permintaan pembelian → approval → pemesanan → penerimaan → pemakaian, dengan **penanda kuning/merah** otomatis.
 
 Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpan di **Oracle Database**.
 
@@ -18,11 +19,11 @@ Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpa
 
 | Folder      | Isi |
 |-------------|-----|
-| `database/` | Skema Oracle: absensi (01), role (02), material (03), laporan K3 (04) |
+| `database/` | Skema Oracle: absensi (01), role (02), material (03), laporan K3 (04), tanda tangan (05), tenaga kerja & upah (06) |
 | `backend/`  | REST API (Node.js, Express, node-oracledb mode *thin* — tanpa Instant Client) |
 | `mobile/`   | Aplikasi Flutter (web + Android + iOS) |
 | `deploy/`   | Docker Compose (Oracle + API), konfigurasi Nginx, skrip backup |
-| `docs/`     | Panduan deploy ke VPS Hostinger |
+| `docs/`     | Panduan deploy ke VPS Hostinger, screenshot tampilan (`docs/screenshots/`), contoh PDF |
 
 ## Role & hak akses
 
@@ -40,6 +41,11 @@ Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpa
 | **Laporan K3:** mengetahui (PIC Site) | ✓ | – | – | ✓ | – | – | – |
 | **Laporan K3:** menyetujui | ✓ | – | – | – | ✓ | – | – |
 | **Laporan K3:** lihat & cetak | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – |
+| **Tenaga kerja:** data pekerja & upah | ✓ | ✓ | ✓ | site-nya | – | – | – |
+| **Tenaga kerja:** absen harian, ajukan rekap | ✓ | – | – | site-nya | – | – | – |
+| **Tenaga kerja:** kasbon | ✓ | ✓ | – | site-nya | – | – | – |
+| **Tenaga kerja:** setujui rekap upah | ✓ | – | ✓ | – | – | – | – |
+| **Tenaga kerja:** tandai sudah dibayar | ✓ | ✓ | ✓ | – | – | – | – |
 
 Hak akses diperiksa **di server** (`backend/src/roles.js`); menu di aplikasi hanya tampilan.
 Site Manager, HSE Officer, dan Logistik yang ditugaskan ke satu lokasi hanya bisa mengakses data lokasinya.
@@ -58,6 +64,16 @@ Logikanya ada di `backend/src/utils/materialStatus.js` dan diuji di `backend/tes
 
 Saat Logistik mengajukan pembelian, Project Manager melihat **proyeksi** sebelum menyetujui, misalnya
 "Jika disetujui, pengadaan menjadi 116,7%, melebihi kebutuhan sebesar 10".
+
+## Tenaga kerja harian & rekap upah
+
+- **Data pekerja** per lokasi: nama, kategori (Mandor / Tukang / Buruh), keahlian, **upah harian**, **tarif lembur per jam**.
+- **Absen harian oleh Site Manager** (pekerja tidak perlu akun/HP): Hadir, ½ hari, atau Tidak masuk, plus jam lembur. Saat disimpan, **posisi GPS Site Manager dicek harus di dalam area proyek**. Foto apel pagi bisa dilampirkan sebagai bukti. Hari Minggu tidak dihitung, dan pengisian maksimal 6 hari ke belakang.
+- **Perhitungan** (`backend/src/utils/payroll.js`, diuji di `backend/test/payroll.test.js`):
+  `upah = Σ (1 × upah harian untuk Hadir, 0,5 × untuk ½ hari)` + `lembur = jam × tarif lembur` − `kasbon pekan itu`.
+  Upah sebuah hari mengikuti **tarif saat hari itu pertama kali dicatat**, sehingga kenaikan upah tidak mengubah hari yang sudah lewat.
+- **Rekap mingguan Senin–Sabtu**: Site Manager mengajukan → PM menyetujui (atau mengembalikan dengan catatan) → Admin/PM menandai sudah dibayar. Setelah diajukan, absensi dan kasbon pekan itu **terkunci**. Saat disetujui, angka rekap **dibekukan**. Kedua tahap mewajibkan tanda tangan digital.
+- Rekap bisa **dicetak/PDF** (dengan kolom paraf dan tanda tangan) atau **diunduh ke Excel (CSV)**.
 
 ## Laporan Harian K3
 
@@ -126,6 +142,7 @@ cd backend
 npm test                                                            # unit test logika ambang batas
 API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test.js           # login & absensi
 API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-modules.js   # material & laporan K3
+API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-workers.js   # tenaga kerja & rekap upah
 ```
 
 ### Izin lokasi di HP (setelah `flutter create`)
@@ -156,6 +173,8 @@ API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-
 | GET/POST/PUT | `/api/users`, `/api/users/roles`, `POST /api/users/:id/reset-password` | admin |
 | GET/POST/PUT | `/api/materials/catalog`, `/api/materials/plans`, `POST /api/materials/movements`, `GET /api/materials/alerts` | material |
 | GET/POST | `/api/purchase-requests`, `/:id/approve`, `/:id/reject`, `/:id/cancel`, `/:id/order`, `/:id/receive` | material |
+| GET/POST/PUT | `/api/workers`, `/api/workers/attendance`, `/api/workers/attendance/photo`, `/api/workers/advances` | tenaga kerja |
+| GET/POST | `/api/workers/payroll`, `/payroll/weeks`, `/payroll/submit`, `/payroll/approve`, `/payroll/return`, `/payroll/paid`, `/payroll/link` | rekap upah |
 | GET/POST/PUT/DELETE | `/api/hse-reports`, `/:id/photos`, `/:id/submit`, `/:id/acknowledge`, `/:id/approve`, `/:id/return`, `/:id/print-link`, `/settings/:siteId` | laporan K3 |
 
 Deploy ke VPS: lihat **[docs/DEPLOY_HOSTINGER.md](docs/DEPLOY_HOSTINGER.md)**.

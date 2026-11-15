@@ -37,6 +37,15 @@ const PERMISSIONS = Object.freeze({
   acknowledgeHseReports: [R.SUPERADMIN, R.SITE_MANAGER],
   approveHseReports: [R.SUPERADMIN, R.HSE_MANAGER],
   manageReportSettings: [R.SUPERADMIN, R.ADMIN, R.HSE_MANAGER, R.PROJECT_MANAGER],
+
+  // Tenaga kerja harian (tukang, mandor, buruh) & upah
+  viewWorkers: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER],
+  manageWorkers: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER],
+  recordWorkerAttendance: [R.SUPERADMIN, R.SITE_MANAGER],
+  recordCashAdvance: [R.SUPERADMIN, R.ADMIN, R.SITE_MANAGER],
+  submitPayroll: [R.SUPERADMIN, R.SITE_MANAGER],
+  approvePayroll: [R.SUPERADMIN, R.PROJECT_MANAGER],
+  markPayrollPaid: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER],
 });
 
 /** Role yang aksesnya dibatasi ke lokasi (site) miliknya bila user ditugaskan ke satu site. */

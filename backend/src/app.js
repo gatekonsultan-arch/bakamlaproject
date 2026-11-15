@@ -38,6 +38,7 @@ app.use('/api/materials', require('./routes/materials'));
 app.use('/api/purchase-requests', require('./routes/purchaseRequests'));
 app.use('/api/hse-reports', require('./routes/hseReports'));
 app.use('/api/files', require('./routes/files'));
+app.use('/api/workers', require('./routes/workers'));
 
 app.use('/api', notFoundHandler);
 app.use(errorHandler);

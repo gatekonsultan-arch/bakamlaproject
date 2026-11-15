@@ -27,4 +27,12 @@ void main() {
     expect(canViewHseReports('SITE_MANAGER'), isTrue);
     expect(canViewHseReports('LOGISTIK'), isFalse);
   });
+
+  test('tenaga kerja: Site Manager mengabsen, upah tidak terlihat Logistik/HSE', () {
+    expect(canRecordWorkerAttendance('SITE_MANAGER'), isTrue);
+    expect(canRecordWorkerAttendance('PROJECT_MANAGER'), isFalse);
+    expect(canViewWorkers('PROJECT_MANAGER'), isTrue);
+    expect(canViewWorkers('LOGISTIK'), isFalse);
+    expect(canViewWorkers('HSE_OFFICER'), isFalse);
+  });
 }

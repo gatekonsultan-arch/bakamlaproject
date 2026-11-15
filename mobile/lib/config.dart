@@ -37,3 +37,9 @@ bool canViewHseReports(String r) => _in(
 bool canWriteHseReports(String r) => _in(r, {'SUPERADMIN', 'HSE_OFFICER', 'HSE_MANAGER'});
 bool canManageReportSettings(String r) =>
     _in(r, {'SUPERADMIN', 'ADMIN', 'HSE_MANAGER', 'PROJECT_MANAGER'});
+
+// Tenaga kerja harian (tukang, mandor, buruh) & upah
+bool canViewWorkers(String r) => _in(r, {'SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'SITE_MANAGER'});
+bool canManageWorkers(String r) => canViewWorkers(r);
+bool canRecordWorkerAttendance(String r) => _in(r, {'SUPERADMIN', 'SITE_MANAGER'});
+bool canRecordCashAdvance(String r) => _in(r, {'SUPERADMIN', 'ADMIN', 'SITE_MANAGER'});
