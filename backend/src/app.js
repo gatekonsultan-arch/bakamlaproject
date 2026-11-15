@@ -34,6 +34,10 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/sites', require('./routes/sites'));
 app.use('/api/attendance', require('./routes/attendance'));
+app.use('/api/materials', require('./routes/materials'));
+app.use('/api/purchase-requests', require('./routes/purchaseRequests'));
+app.use('/api/hse-reports', require('./routes/hseReports'));
+app.use('/api/files', require('./routes/files'));
 
 app.use('/api', notFoundHandler);
 app.use(errorHandler);

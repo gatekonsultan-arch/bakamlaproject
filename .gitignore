@@ -3,3 +3,4 @@ node_modules/
 *.log
 deploy/.env
 deploy/web/
+uploads/

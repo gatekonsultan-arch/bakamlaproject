@@ -1,6 +1,10 @@
-# Aplikasi Absensi Proyek (Geotagging) — Web & Mobile
+# Aplikasi Proyek: Absensi, Laporan Harian K3 & Kontrol Material — Web & Mobile
 
-Aplikasi login dan absensi berbasis lokasi GPS untuk proyek konstruksi.
+Aplikasi proyek konstruksi dengan tiga modul:
+1. **Absensi geotagging**: check-in/out hanya sah di dalam radius lokasi kerja.
+2. **Laporan Harian K3**: disusun HSE Officer, diketahui PIC Site, disetujui HSE Manager, lalu dicetak ke PDF A4. Contoh hasil: [docs/contoh-laporan-harian-k3.pdf](docs/contoh-laporan-harian-k3.pdf)
+3. **Kontrol material logistik**: kebutuhan → permintaan pembelian → approval → pemesanan → penerimaan → pemakaian, dengan **penanda kuning/merah** otomatis.
+
 Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpan di **Oracle Database**.
 
 ```
@@ -14,7 +18,7 @@ Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpa
 
 | Folder      | Isi |
 |-------------|-----|
-| `database/` | Skema tabel Oracle + data role awal |
+| `database/` | Skema Oracle: absensi (01), role (02), material (03), laporan K3 (04) |
 | `backend/`  | REST API (Node.js, Express, node-oracledb mode *thin* — tanpa Instant Client) |
 | `mobile/`   | Aplikasi Flutter (web + Android + iOS) |
 | `deploy/`   | Docker Compose (Oracle + API), konfigurasi Nginx, skrip backup |
@@ -22,14 +26,48 @@ Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpa
 
 ## Role & hak akses
 
-| Fitur | Super Admin | Admin | Project Mgr | Site Mgr | HSE Mgr | Logistik |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| Login, check-in/out, riwayat sendiri | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Laporan & rekap absensi | semua | semua | semua | **site-nya saja** | semua | – |
-| Kelola lokasi (site) | ✓ | ✓ | – | – | – | – |
-| Kelola pengguna | semua role | selain Super Admin/Admin | – | – | – | – |
+| Fitur | Super Admin | Admin | Project Mgr | Site Mgr | HSE Mgr | HSE Officer | Logistik |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| Login, check-in/out, riwayat sendiri | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Rekap absensi | semua | semua | semua | site-nya | semua | – | – |
+| Kelola lokasi | ✓ | ✓ | – | – | – | – | – |
+| Kelola pengguna | semua | selain SA/Admin | – | – | – | – | – |
+| **Material:** input kebutuhan & ambang batas | ✓ | ✓ | ✓ | site-nya | – | – | – |
+| **Material:** ajukan pembelian, catat pesanan/terima/pakai | ✓ | – | – | – | – | – | ✓ |
+| **Material:** setujui / tolak pembelian | ✓ | – | ✓ | – | – | – | – |
+| **Material:** lihat stok & penanda | ✓ | ✓ | ✓ | ✓ | – | – | ✓ |
+| **Laporan K3:** susun & kirim | ✓ | – | – | – | ✓ | ✓ | – |
+| **Laporan K3:** mengetahui (PIC Site) | ✓ | – | – | ✓ | – | – | – |
+| **Laporan K3:** menyetujui | ✓ | – | – | – | ✓ | – | – |
+| **Laporan K3:** lihat & cetak | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – |
 
-Hak akses diperiksa **di server** (`backend/src/roles.js`). Menu di aplikasi hanya tampilan.
+Hak akses diperiksa **di server** (`backend/src/roles.js`); menu di aplikasi hanya tampilan.
+Site Manager, HSE Officer, dan Logistik yang ditugaskan ke satu lokasi hanya bisa mengakses data lokasinya.
+Orang yang mengajukan pembelian **tidak bisa** menyetujui pengajuannya sendiri.
+
+## Penanda ambang batas material
+
+Setiap material per lokasi punya **kebutuhan** (rencana/RAB), **stok minimum**, dan **% peringatan** (default 80%).
+Logikanya ada di `backend/src/utils/materialStatus.js` dan diuji di `backend/test/`.
+
+| Jenis | 🟡 Kuning (mendekati) | 🔴 Merah (melewati) |
+|---|---|---|
+| Pengadaan (diterima + sedang dipesan) | ≥ 80% kebutuhan | > 100% kebutuhan |
+| Pemakaian | ≥ 80% kebutuhan | > 100% kebutuhan |
+| Stok di lokasi | stok ≤ minimum ÷ 80% (mis. min 50 → ≤ 62,5) | stok ≤ minimum |
+
+Saat Logistik mengajukan pembelian, Project Manager melihat **proyeksi** sebelum menyetujui, misalnya
+"Jika disetujui, pengadaan menjadi 116,7%, melebihi kebutuhan sebesar 10".
+
+## Laporan Harian K3
+
+- Format mengikuti laporan proyek: kop, uraian kegiatan, lampiran foto, site plan, tabel cuaca per jam sebulan, bagian **A–J**, dan lembar persetujuan bertanda tangan.
+- **Anggota tim & man-hours terisi otomatis** dari absensi di lokasi itu pada hari tersebut, ditambah personel tanpa akun dari pengaturan.
+- Foto diunggah dari HP/komputer. Jam foto diambil dari EXIF, lalu foto diperkecil dan **metadata GPS dihapus**. Aktivitas dipilih per foto dari pustaka aktivitas.
+- Alur: **Draf → Dikirim → Diketahui PIC Site → Disetujui HSE Manager**. Laporan dapat dikembalikan untuk revisi dengan catatan. Setelah dikirim, laporan terkunci.
+- Tanda tangan digambar sekali di menu Profil, lalu dipakai otomatis di lembar persetujuan.
+- Cetak: tombol 🖨 → PDF bahasa Inggris (resmi) atau bahasa Indonesia. Laporan yang belum disetujui diberi watermark **DRAFT**.
+- Pengaturan per lokasi (kop, proyek, kontraktor, inspektur, APD, logo, site plan dasar): ikon ⚙ di halaman Laporan K3.
 
 ## Cara kerja absensi geotagging
 
@@ -81,7 +119,13 @@ flutter pub get
 flutter run -d chrome --dart-define=API_URL=http://localhost:3000
 ```
 
-Uji otomatis alur API (gunakan database uji): `API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node backend/scripts/smoke-test.js`
+Pengujian (gunakan database uji, **bukan** produksi):
+```bash
+cd backend
+npm test                                                            # unit test logika ambang batas
+API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test.js           # login & absensi
+API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-modules.js   # material & laporan K3
+```
 
 ### Izin lokasi di HP (setelah `flutter create`)
 
@@ -109,5 +153,8 @@ Uji otomatis alur API (gunakan database uji): `API_URL=http://localhost:3000 SUP
 | GET | `/api/attendance` · `/summary` · `/export.csv` | laporan |
 | GET/POST/PUT | `/api/sites` | GET: login, ubah: admin |
 | GET/POST/PUT | `/api/users`, `/api/users/roles`, `POST /api/users/:id/reset-password` | admin |
+| GET/POST/PUT | `/api/materials/catalog`, `/api/materials/plans`, `POST /api/materials/movements`, `GET /api/materials/alerts` | material |
+| GET/POST | `/api/purchase-requests`, `/:id/approve`, `/:id/reject`, `/:id/cancel`, `/:id/order`, `/:id/receive` | material |
+| GET/POST/PUT/DELETE | `/api/hse-reports`, `/:id/photos`, `/:id/submit`, `/:id/acknowledge`, `/:id/approve`, `/:id/return`, `/:id/print-link`, `/settings/:siteId` | laporan K3 |
 
 Deploy ke VPS: lihat **[docs/DEPLOY_HOSTINGER.md](docs/DEPLOY_HOSTINGER.md)**.

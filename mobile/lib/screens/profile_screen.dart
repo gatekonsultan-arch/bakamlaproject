@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../main.dart';
+import '../services/api.dart';
 import '../widgets/common.dart';
+import '../widgets/signature_pad.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -29,6 +31,10 @@ class ProfileScreen extends StatelessWidget {
                   subtitle: Text(u.siteName ?? 'Semua lokasi (terdekat)')),
             ]),
           ),
+          if (canViewHseReports(u.role)) ...[
+            const SizedBox(height: 16),
+            const _SignatureCard(),
+          ],
           const SizedBox(height: 16),
           OutlinedButton.icon(
             onPressed: () => showDialog(context: context, builder: (_) => const _ChangePasswordDialog()),
@@ -109,5 +115,57 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
           FilledButton(onPressed: _busy ? null : _save, child: const Text('Simpan')),
         ],
+      );
+}
+
+/// Tanda tangan dipakai otomatis di lembar persetujuan laporan K3.
+class _SignatureCard extends StatefulWidget {
+  const _SignatureCard();
+  @override
+  State<_SignatureCard> createState() => _SignatureCardState();
+}
+
+class _SignatureCardState extends State<_SignatureCard> {
+  String? _url;
+
+  @override
+  void initState() {
+    super.initState();
+    Api.instance.get('/hse-reports/me/signature').then((r) {
+      if (mounted) setState(() => _url = r['url'] as String?);
+    }).catchError((_) {});
+  }
+
+  Future<void> _draw() async {
+    final png = await showDialog<List<int>>(context: context, builder: (_) => const SignaturePadDialog());
+    if (png == null) return;
+    try {
+      final r = await Api.instance.upload('/hse-reports/me/signature', [(field: 'file', filename: 'ttd.png', bytes: png)]);
+      setState(() => _url = r['url'] as String?);
+      if (mounted) showSnack(context, 'Tanda tangan disimpan');
+    } catch (e) {
+      if (mounted) showSnack(context, e.toString(), error: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Text('Tanda tangan untuk laporan K3', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Container(
+              height: 90,
+              color: Colors.white,
+              alignment: Alignment.center,
+              child: _url == null
+                  ? const Text('Belum ada', style: TextStyle(color: Colors.grey))
+                  : Image.network(Api.instance.abs(_url), fit: BoxFit.contain),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(onPressed: _draw, icon: const Icon(Icons.draw), label: Text(_url == null ? 'Buat tanda tangan' : 'Ganti tanda tangan')),
+          ]),
+        ),
       );
 }

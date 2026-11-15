@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Akses galeri dibutuhkan untuk melampirkan foto kegiatan pada laporan K3.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Kamera dibutuhkan untuk memotret kegiatan untuk laporan K3.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Lokasi dibutuhkan untuk memverifikasi absensi di lokasi kerja.</string>
 	<key>CFBundleDevelopmentRegion</key>

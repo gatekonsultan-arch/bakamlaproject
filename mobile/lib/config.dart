@@ -10,6 +10,7 @@ const Map<String, String> roleLabels = {
   'LOGISTIK': 'Logistik',
   'SITE_MANAGER': 'Site Manager',
   'HSE_MANAGER': 'HSE Manager',
+  'HSE_OFFICER': 'HSE Officer',
   'PROJECT_MANAGER': 'Project Manager',
 };
 
@@ -20,3 +21,19 @@ bool canManageSites(String role) => role == 'SUPERADMIN' || role == 'ADMIN';
 bool canViewReports(String role) => const {
       'SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'SITE_MANAGER', 'HSE_MANAGER'
     }.contains(role);
+
+bool _in(String role, Set<String> roles) => roles.contains(role);
+
+// Material logistik
+bool canViewMaterials(String r) =>
+    _in(r, {'SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'SITE_MANAGER', 'LOGISTIK'});
+bool canPlanMaterials(String r) => _in(r, {'SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'SITE_MANAGER'});
+bool canRequestPurchase(String r) => _in(r, {'SUPERADMIN', 'LOGISTIK'});
+bool canHandleStock(String r) => _in(r, {'SUPERADMIN', 'LOGISTIK'});
+
+// Laporan Harian K3
+bool canViewHseReports(String r) => _in(
+    r, {'SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'SITE_MANAGER', 'HSE_MANAGER', 'HSE_OFFICER'});
+bool canWriteHseReports(String r) => _in(r, {'SUPERADMIN', 'HSE_OFFICER', 'HSE_MANAGER'});
+bool canManageReportSettings(String r) =>
+    _in(r, {'SUPERADMIN', 'ADMIN', 'HSE_MANAGER', 'PROJECT_MANAGER'});

@@ -29,12 +29,15 @@ services:
     environment:
       DB_CONNECT_STRING: oracle:1521/FREEPDB1
       SQL_DIR: /app/database
+      UPLOAD_DIR: /app/uploads
       PORT: 3000
       TRUST_PROXY: "1"
     volumes:
       - ../database:/app/database:ro
+      - uploads:/app/uploads   # foto laporan, logo, tanda tangan (ikut di-backup!)
     ports:
       - "127.0.0.1:3000:3000"
 
 volumes:
   oracle-data:
+  uploads:

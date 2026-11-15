@@ -5,6 +5,8 @@ const config = require('./config');
 // Thin mode (default node-oracledb v6): tidak perlu Oracle Instant Client.
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 oracledb.autoCommit = false;
+// CLOB (JSON laporan) langsung dibaca sebagai string.
+oracledb.fetchAsString = [oracledb.CLOB];
 
 let pool;
 
@@ -71,4 +73,10 @@ async function one(sql, binds = {}) {
   return r[0] || null;
 }
 
-module.exports = { oracledb, init, close, withConnection, query, rows, one, camel };
+/** Jalankan SQL pada koneksi transaksi yang sudah ada; hasil baris dalam camelCase. */
+async function x(conn, sql, binds = {}, opts = {}) {
+  const r = await conn.execute(sql, binds, opts);
+  return { rows: (r.rows || []).map(camel), rowsAffected: r.rowsAffected, outBinds: r.outBinds };
+}
+
+module.exports = { oracledb, init, close, withConnection, query, rows, one, camel, x };

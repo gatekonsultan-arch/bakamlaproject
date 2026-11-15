@@ -4,6 +4,8 @@ import '../config.dart';
 import '../main.dart';
 import 'attendance_screen.dart';
 import 'history_screen.dart';
+import 'hse_reports_screen.dart';
+import 'materials_screen.dart';
 import 'profile_screen.dart';
 import 'report_screen.dart';
 import 'sites_screen.dart';
@@ -29,7 +31,9 @@ class _HomeScreenState extends State<HomeScreen> {
   List<_Dest> _destinations(String role) => [
         const _Dest('Absen', Icons.fingerprint, AttendanceScreen()),
         const _Dest('Riwayat', Icons.history, HistoryScreen()),
-        if (canViewReports(role)) const _Dest('Laporan', Icons.assessment_outlined, ReportScreen()),
+        if (canViewHseReports(role)) const _Dest('Laporan K3', Icons.health_and_safety_outlined, HseReportsScreen()),
+        if (canViewMaterials(role)) const _Dest('Material', Icons.inventory_2_outlined, MaterialsScreen()),
+        if (canViewReports(role)) const _Dest('Rekap Absen', Icons.assessment_outlined, ReportScreen()),
         if (canManageUsers(role)) const _Dest('Pengguna', Icons.group_outlined, UsersScreen()),
         if (canManageSites(role)) const _Dest('Lokasi', Icons.place_outlined, SitesScreen()),
         const _Dest('Profil', Icons.person_outline, ProfileScreen()),
@@ -41,6 +45,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final dests = _destinations(user.role);
     if (_index >= dests.length) _index = 0;
     final wide = MediaQuery.sizeOf(context).width >= 840;
+    // Di HP: bottom bar untuk <= 5 menu, drawer bila lebih banyak.
+    final useDrawer = !wide && dests.length > 5;
 
     final body = IndexedStack(index: _index, children: [for (final d in dests) d.page]);
 
@@ -73,7 +79,23 @@ class _HomeScreenState extends State<HomeScreen> {
               Expanded(child: body),
             ])
           : body,
-      bottomNavigationBar: wide
+      drawer: useDrawer
+          ? NavigationDrawer(
+              selectedIndex: _index,
+              onDestinationSelected: (i) {
+                setState(() => _index = i);
+                Navigator.pop(context);
+              },
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(28, 16, 16, 10),
+                  child: Text(user.fullName, style: Theme.of(context).textTheme.titleSmall),
+                ),
+                for (final d in dests) NavigationDrawerDestination(icon: Icon(d.icon), label: Text(d.label)),
+              ],
+            )
+          : null,
+      bottomNavigationBar: wide || useDrawer
           ? null
           : NavigationBar(
               selectedIndex: _index,

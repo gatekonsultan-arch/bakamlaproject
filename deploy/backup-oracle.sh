@@ -19,5 +19,8 @@ expdp ${DB_USER}/${DB_PASSWORD}@FREEPDB1 schemas=${DB_USER} directory=dump_dir \
 docker compose cp oracle:/opt/oracle/oradata/dump/absensi_${STAMP}.dmp "$DEST/"
 docker compose exec -T oracle rm -f /opt/oracle/oradata/dump/absensi_${STAMP}.dmp
 gzip "$DEST/absensi_${STAMP}.dmp"
+# Foto laporan, logo & tanda tangan
+docker compose exec -T api tar czf - -C /app uploads > "$DEST/uploads_${STAMP}.tar.gz"
+find "$DEST" -name 'uploads_*.tar.gz' -mtime +14 -delete
 find "$DEST" -name '*.dmp.gz' -mtime +14 -delete
 echo "Backup selesai: $DEST/absensi_${STAMP}.dmp.gz"

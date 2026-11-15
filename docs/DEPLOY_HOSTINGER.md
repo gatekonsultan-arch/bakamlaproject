@@ -65,6 +65,14 @@ docker compose exec -e SUPERADMIN_PASSWORD='PasswordSuperKuat123' api npm run cr
 curl http://127.0.0.1:3000/api/health
 ```
 
+### Memperbarui aplikasi (versi baru dari git)
+
+```bash
+cd /opt/absensi && git pull
+cd deploy && docker compose up -d --build
+docker compose exec api npm run migrate      # menambah tabel baru; tabel & data lama tidak diubah
+```
+
 ## 4. Build aplikasi web & pasang Nginx + HTTPS
 
 Di komputer Anda (atau di VPS jika Flutter terpasang):
@@ -111,5 +119,5 @@ Salin folder `/opt/absensi/backups` ke luar VPS (rclone ke Google Drive/S3), dan
 - [ ] HTTPS aktif (certbot), HTTP dialihkan ke HTTPS
 - [ ] Semua password di `.env` kuat dan unik, `JWT_SECRET` acak 96 karakter, `.env` permission 600
 - [ ] Password superadmin diganti setelah login pertama
-- [ ] Backup harian berjalan & tersalin ke luar VPS, restore sudah diuji
+- [ ] Backup harian (database **dan** folder foto `uploads`) berjalan & tersalin ke luar VPS, restore sudah diuji
 - [ ] Update rutin: `sudo apt upgrade`, `docker compose pull && docker compose up -d`

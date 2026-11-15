@@ -13,6 +13,12 @@ function errorHandler(err, req, res, _next) {
   if (err instanceof HttpError) {
     return res.status(err.status).json({ message: err.message, ...(err.details || {}) });
   }
+  if (err && err.name === 'MulterError') {
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Ukuran file terlalu besar'
+      : err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE' ? 'Jumlah file terlalu banyak / nama field salah'
+        : 'Upload gagal';
+    return res.status(400).json({ message: msg });
+  }
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ message: 'Format JSON tidak valid' });
   }

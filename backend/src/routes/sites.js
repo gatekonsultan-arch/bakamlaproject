@@ -28,14 +28,21 @@ router.get('/', async (req, res) => {
   res.json({ sites: list.map(toDto) });
 });
 
-const siteSchema = z.object({
+const siteFields = {
   name: z.string().trim().min(1).max(120),
   address: optionalText(255),
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
-  radiusM: z.number().int().min(10).max(50000).default(100),
-  isActive: z.boolean().default(true),
+  radiusM: z.number().int().min(10).max(50000),
+  isActive: z.boolean(),
+};
+const siteSchema = z.object({
+  ...siteFields,
+  radiusM: siteFields.radiusM.default(100),
+  isActive: siteFields.isActive.default(true),
 });
+// Update sebagian: tanpa nilai default agar field yang tidak dikirim tidak berubah.
+const siteUpdateSchema = z.object(siteFields).partial();
 
 router.post('/', requirePermission('manageSites'), async (req, res) => {
   const d = siteSchema.parse(req.body);
@@ -56,7 +63,7 @@ router.post('/', requirePermission('manageSites'), async (req, res) => {
 
 router.put('/:id', requirePermission('manageSites'), async (req, res) => {
   const siteId = id.parse(req.params.id);
-  const d = siteSchema.partial().parse(req.body);
+  const d = siteUpdateSchema.parse(req.body);
   const exists = await db.one('SELECT id FROM sites WHERE id = :id', { id: siteId });
   if (!exists) throw notFound('Lokasi tidak ditemukan');
 
