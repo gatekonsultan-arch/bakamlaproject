@@ -4,6 +4,7 @@
  *   API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-modules.js
  */
 const sharp = require('sharp');
+const { selfie, postAttendance, consent } = require('./lib/selfie');
 
 const BASE = process.env.API_URL || 'http://localhost:3000';
 let failures = 0;
@@ -108,7 +109,9 @@ function expect(name, cond, info) {
 
   console.log('\n-- Laporan Harian K3');
   // Absen HSE Officer di lokasi -> otomatis jadi anggota tim laporan
-  await call('POST', '/api/attendance/check-in', { token: ho, body: { latitude: -5.06, longitude: 119.47, accuracy: 10 } });
+  await consent(BASE, ho);
+  const hoIn = await postAttendance(BASE, '/api/attendance/check-in', ho, { latitude: -5.06, longitude: 119.47, accuracy: 10 }, await selfie());
+  expect('HSE Officer check-in (selfie)', hoIn.status === 201, hoIn.body);
   const sett = await call('PUT', `/api/hse-reports/settings/${site.id}`, { token: hm, body: { con: 'PT Kontraktor Uji', loc: 'Site Uji, Makassar', start: '2026-11-01', pm: 'Nama PM', members: [['Operator Satu', 'Heavy Equipment Operator']] } });
   expect('HSE Manager atur pengaturan laporan lokasi', sett.status === 200, sett.body);
   const noRep = await call('POST', '/api/hse-reports', { token: lg, body: { siteId: site.id } });

@@ -76,13 +76,14 @@ class GeoPoint {
   final double longitude;
   final double? accuracy;
   final double? distanceM;
+  final String? photoUrl;
 
-  GeoPoint(this.at, this.latitude, this.longitude, this.accuracy, this.distanceM);
+  GeoPoint(this.at, this.latitude, this.longitude, this.accuracy, this.distanceM, [this.photoUrl]);
 
   static GeoPoint? fromJson(Map<String, dynamic>? j) => j == null || j['at'] == null
       ? null
       : GeoPoint(_date(j['at'])!, _num(j['latitude'])!, _num(j['longitude'])!,
-          _num(j['accuracy']), _num(j['distanceM']));
+          _num(j['accuracy']), _num(j['distanceM']), j['photoUrl'] as String?);
 }
 
 class Attendance {

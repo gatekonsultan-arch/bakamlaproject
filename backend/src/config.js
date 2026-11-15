@@ -34,6 +34,9 @@ const config = {
   timezone: process.env.APP_TIMEZONE || 'Asia/Jakarta',
   maxGpsAccuracyM: parseFloat(process.env.MAX_GPS_ACCURACY_M || '100'),
   rejectMockLocation: (process.env.REJECT_MOCK_LOCATION || 'true') === 'true',
+  // Selfie wajah wajib saat check-in/out staf
+  requireSelfie: (process.env.REQUIRE_SELFIE || 'true') === 'true',
+  facePhotoRetentionDays: parseInt(process.env.FACE_PHOTO_RETENTION_DAYS || '90', 10),
 };
 
 if (config.jwt.secret.length < 32 || config.jwt.secret.startsWith('GANTI')) {

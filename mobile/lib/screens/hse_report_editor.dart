@@ -389,6 +389,8 @@ class _HseReportEditorState extends State<HseReportEditor> {
           if (_photos.isEmpty) const EmptyState(icon: Icons.photo_library_outlined, text: 'Belum ada foto.'),
           for (final p in _photos)
             Card(
+              // Kunci per foto: isian (jam, keterangan) tidak tertukar saat urutan berubah setelah upload/hapus.
+              key: ValueKey('photo-${p['id']}'),
               child: Padding(
                 padding: const EdgeInsets.all(8),
                 child: Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.start, children: [

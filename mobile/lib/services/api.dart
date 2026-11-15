@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 import '../config.dart';
 
@@ -88,10 +89,22 @@ class Api {
       if (token != null) req.headers['Authorization'] = 'Bearer $token';
       req.fields.addAll(fields);
       for (final f in files) {
-        req.files.add(http.MultipartFile.fromBytes(f.field, f.bytes, filename: f.filename));
+        req.files.add(http.MultipartFile.fromBytes(f.field, f.bytes,
+            filename: f.filename, contentType: _imageType(f.filename)));
       }
       return http.Response.fromStream(await req.send());
     }, longTimeout: true);
+  }
+
+  /// Jenis file dari ekstensi (server tetap memvalidasi isi file).
+  static MediaType _imageType(String name) {
+    final ext = name.toLowerCase().split('.').last;
+    return switch (ext) {
+      'png' => MediaType('image', 'png'),
+      'webp' => MediaType('image', 'webp'),
+      'heic' || 'heif' => MediaType('image', 'heic'),
+      _ => MediaType('image', 'jpeg'),
+    };
   }
 
   /// URL absolut dari path relatif server (mis. URL foto bertanda tangan).

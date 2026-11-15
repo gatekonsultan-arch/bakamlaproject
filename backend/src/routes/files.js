@@ -5,7 +5,7 @@ const { filePath, verify } = require('../utils/files');
 const { notFound } = require('../utils/errors');
 
 const router = express.Router();
-const KINDS = new Set(['hse', 'settings', 'signatures']);
+const KINDS = new Set(['hse', 'settings', 'signatures', 'faces']);
 
 // GET /api/files/:kind/:name?t=<token bertanda tangan>
 router.get('/:kind/:name', (req, res) => {

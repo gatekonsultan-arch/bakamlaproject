@@ -8,6 +8,8 @@
 | OS | Ubuntu 24.04 LTS | Ubuntu 24.04 LTS |
 | Disk | 50 GB | 100 GB+ (foto laporan nanti butuh ruang) |
 
+Deteksi wajah untuk selfie absensi berjalan di container API (±350 MB RAM, ±1 detik per foto, tanpa GPU).
+
 Oracle Database 23ai **Free** dibatasi 2 CPU, 2 GB RAM untuk database, dan **12 GB data user**.
 Untuk absensi saja batas ini sangat cukup. Jika nanti melebihi, perlu lisensi Oracle Standard/Enterprise Edition.
 
@@ -78,6 +80,7 @@ docker compose exec api npm run migrate      # menambah tabel baru; tabel & data
 Di komputer Anda (atau di VPS jika Flutter terpasang):
 ```bash
 cd mobile
+flutter clean          # wajib bila ada plugin baru (kamera, cetak) agar terdaftar di versi web
 flutter build web --release --no-web-resources-cdn
 rsync -a build/web/ deploy@IP_VPS:/tmp/web/
 ```
@@ -119,5 +122,6 @@ Salin folder `/opt/absensi/backups` ke luar VPS (rclone ke Google Drive/S3), dan
 - [ ] HTTPS aktif (certbot), HTTP dialihkan ke HTTPS
 - [ ] Semua password di `.env` kuat dan unik, `JWT_SECRET` acak 96 karakter, `.env` permission 600
 - [ ] Password superadmin diganti setelah login pertama
+- [ ] Formulir persetujuan foto wajah (UU PDP) sudah disosialisasikan ke karyawan; masa simpan foto (90 hari) sesuai kebijakan instansi
 - [ ] Backup harian (database **dan** folder foto `uploads`) berjalan & tersalin ke luar VPS, restore sudah diuji
 - [ ] Update rutin: `sudo apt upgrade`, `docker compose pull && docker compose up -d`
