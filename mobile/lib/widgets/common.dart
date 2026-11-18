@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 final fmtTime = DateFormat('HH:mm', 'id_ID');
 final fmtDate = DateFormat('EEEE, d MMM yyyy', 'id_ID');
@@ -49,4 +51,13 @@ class EmptyState extends StatelessWidget {
           Text(text, textAlign: TextAlign.center),
         ]),
       );
+}
+
+/// Membuka halaman cetak/PDF. Di iPhone (Safari/Chrome) tab baru yang dibuka setelah menunggu
+/// server diblokir sebagai pop-up, jadi di sana halaman dibuka di tab yang sama
+/// (kembali ke aplikasi dengan tombol Back).
+Future<void> openPrintPage(String url) async {
+  final iosWeb = kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+  final ok = await launchUrl(Uri.parse(url), webOnlyWindowName: iosWeb ? '_self' : '_blank');
+  if (!ok) throw Exception('Tidak dapat membuka halaman cetak');
 }

@@ -52,7 +52,8 @@ function assertLocationQuality(loc) {
   if (loc.accuracy == null || loc.accuracy > config.maxGpsAccuracyM) {
     throw unprocessable(
       `Akurasi GPS kurang baik (${loc.accuracy == null ? 'tidak diketahui' : `${Math.round(loc.accuracy)} m`}). ` +
-        `Maksimal ${config.maxGpsAccuracyM} m. Pindah ke area terbuka lalu coba lagi.`,
+        `Maksimal ${config.maxGpsAccuracyM} m. Pindah ke area terbuka lalu coba lagi. `
+        + 'Di iPhone pastikan "Lokasi Akurat" aktif untuk Safari/Chrome (Pengaturan > Privasi & Keamanan > Layanan Lokasi).',
     );
   }
 }

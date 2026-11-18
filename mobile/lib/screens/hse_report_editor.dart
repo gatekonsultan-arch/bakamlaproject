@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api.dart';
 import '../widgets/common.dart';
@@ -150,8 +149,7 @@ class _HseReportEditorState extends State<HseReportEditor> {
     if (_dirty && !await _save(quiet: true)) return;
     try {
       final r = await _api.post('/hse-reports/${widget.id}/print-link', {'lang': lang});
-      final ok = await launchUrl(Uri.parse(_api.abs(r['url'] as String)), webOnlyWindowName: '_blank');
-      if (!ok && mounted) showSnack(context, 'Tidak dapat membuka halaman cetak', error: true);
+      await openPrintPage(_api.abs(r['url'] as String));
     } catch (e) {
       if (mounted) showSnack(context, e.toString(), error: true);
     }
@@ -159,9 +157,11 @@ class _HseReportEditorState extends State<HseReportEditor> {
 
   // ------------------------------------------------------------ foto
   Future<void> _addPhotos() async {
-    if (_dirty && !await _save(quiet: true)) return;
-    final picked = await ImagePicker().pickMultiImage(imageQuality: 90, maxWidth: 2400);
+    // Galeri dibuka LANGSUNG saat tombol diketuk (syarat Safari/Chrome di iPhone), baru simpan perubahan.
+    final pickedFuture = ImagePicker().pickMultiImage(imageQuality: 90, maxWidth: 2400);
+    final picked = await pickedFuture;
     if (picked.isEmpty) return;
+    if (_dirty && !await _save(quiet: true)) return;
     setState(() => _busy = true);
     try {
       final files = <({String field, String filename, List<int> bytes})>[];

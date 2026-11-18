@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../config.dart';
 import '../main.dart';
@@ -361,7 +360,7 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
   Future<void> _print() async {
     try {
       final r = await Api.instance.post('/purchase-requests/${widget.id}/print-link', {});
-      await launchUrl(Uri.parse(Api.instance.abs(r['url'] as String)), webOnlyWindowName: '_blank');
+      await openPrintPage(Api.instance.abs(r['url'] as String));
     } catch (e) {
       if (mounted) showSnack(context, e.toString(), error: true);
     }

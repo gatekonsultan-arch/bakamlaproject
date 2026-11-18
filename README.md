@@ -129,6 +129,11 @@ Formulir *Material Purchase Submission & Approval* menyatu dengan alur **Pembeli
   (`FACE_PHOTO_RETENTION_DAYS`). Catatan kehadirannya tetap disimpan. Penghapusan berjalan tiap 6 jam di server,
   atau manual dengan `npm run purge-face-photos`.
 - Pengaturan di `.env`: `REQUIRE_SELFIE`, `FACE_PHOTO_RETENTION_DAYS`, `FACE_MIN_SCORE`, `FACE_MIN_RATIO`.
+- **iPhone (Safari/Chrome):** kamera web hanya boleh dibuka tepat saat pengguna mengetuk tombol. Karena itu urutannya:
+  **ketuk Check-in → kamera terbuka → selfie → GPS → kirim**. Bila GPS tidak merespons, pencarian lokasi
+  dihentikan dalam 30 detik dengan pesan yang jelas. Halaman cetak dibuka di tab yang sama, karena tab baru diblokir sebagai pop-up.
+  Di iPhone, izinkan lokasi dan aktifkan **Lokasi Akurat** untuk Safari/Chrome
+  (Pengaturan → Privasi & Keamanan → Layanan Lokasi → Safari Websites). Aplikasi web wajib dibuka lewat **HTTPS**.
 - Batasan: deteksi ini tidak bisa membedakan wajah asli dari foto wajah yang dipotret ulang dari layar.
   Untuk itu diperlukan pencocokan wajah + cek keaslian (liveness), yang bisa ditambahkan kemudian.
 

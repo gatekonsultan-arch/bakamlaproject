@@ -34,12 +34,24 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     super.dispose();
   }
 
+  /// Status persetujuan foto wajah, dimuat SEBELUM tombol absen diketuk.
+  /// Penting untuk iPhone: kamera web hanya boleh dibuka tepat saat pengguna mengetuk
+  /// (Safari/Chrome iOS mengabaikan pembukaan kamera setelah menunggu jaringan/GPS).
+  Map<String, dynamic>? _consent;
+
+  /// Menandai percobaan absen yang sedang berjalan; dinaikkan saat dibatalkan.
+  int _attempt = 0;
+  bool _waitingCamera = false;
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final r = await _api.get('/attendance/today');
-      final a = r['attendance'];
-      setState(() => _today = a == null ? null : Attendance.fromJson(a as Map<String, dynamic>));
+      final r = await Future.wait([_api.get('/attendance/today'), _api.get('/attendance/face-consent')]);
+      final a = r[0]['attendance'];
+      setState(() {
+        _today = a == null ? null : Attendance.fromJson(a as Map<String, dynamic>);
+        _consent = r[1];
+      });
     } catch (e) {
       if (mounted) showSnack(context, e.toString(), error: true);
     } finally {
@@ -47,13 +59,30 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
-  /// Persetujuan foto wajah (UU PDP) — diminta sekali saja.
-  Future<bool> _ensureConsent() async {
-    final c = await _api.get('/attendance/face-consent');
-    if (c['required'] != true || c['consentedAt'] != null) return true;
-    if (!mounted) return false;
+  bool get _needConsent => _consent != null && _consent!['required'] == true && _consent!['consentedAt'] == null;
+
+  /// Membuka kamera depan. HARUS dipanggil langsung dari handler ketukan (tanpa await sebelumnya).
+  Future<XFile?> _takeSelfie() => ImagePicker().pickImage(
+        source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.front,
+        maxWidth: 1280,
+        imageQuality: 85,
+      );
+
+  /// Handler tombol absen: sinkron, kamera dibuka seketika.
+  void _onAbsenPressed(bool checkIn) {
+    setState(() => _lastError = null);
+    if (_needConsent) {
+      _askConsentThenCapture(checkIn);
+      return;
+    }
+    _captureAndSubmit(checkIn, _takeSelfie());
+  }
+
+  /// Persetujuan foto wajah (UU PDP), sekali saja. Kamera dibuka oleh ketukan tombol "Lanjut".
+  Future<void> _askConsentThenCapture(bool checkIn) async {
     var agree = false;
-    final ok = await showDialog<bool>(
+    final photo = await showDialog<Future<XFile?>>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
@@ -62,7 +91,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('Absensi memerlukan selfie wajah setiap kali check-in dan check-out.'),
             const SizedBox(height: 8),
-            Text('${c['text']}', style: const TextStyle(fontSize: 13)),
+            Text('${_consent!['text']}', style: const TextStyle(fontSize: 13)),
             const SizedBox(height: 4),
             const Text('Dasar: UU No. 27 Tahun 2022 tentang Pelindungan Data Pribadi.', style: TextStyle(fontSize: 11)),
             CheckboxListTile(
@@ -73,58 +102,83 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             ),
           ]),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
-            FilledButton(onPressed: () => agree ? Navigator.pop(ctx, true) : null, child: const Text('Lanjut')),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            FilledButton(
+              onPressed: agree ? () => Navigator.pop(ctx, _takeSelfie()) : null,
+              child: const Text('Lanjut & ambil selfie'),
+            ),
           ],
         ),
       ),
     );
-    if (ok != true) return false;
-    await _api.post('/attendance/face-consent', {'agree': true});
-    return true;
+    if (photo == null) return;
+    try {
+      await _api.post('/attendance/face-consent', {'agree': true});
+      _consent = {...?_consent, 'consentedAt': DateTime.now().toIso8601String()};
+    } catch (e) {
+      if (mounted) setState(() => _lastError = e.toString());
+      return;
+    }
+    await _captureAndSubmit(checkIn, photo);
   }
 
-  Future<XFile?> _takeSelfie() => ImagePicker().pickImage(
-        source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.front,
-        maxWidth: 1280,
-        imageQuality: 85,
-      );
+  void _cancelAttempt() => setState(() {
+        _attempt++;
+        _busy = false;
+        _waitingCamera = false;
+        _status = null;
+        _lastError = 'Absen dibatalkan.';
+      });
 
-  Future<void> _submit(bool checkIn) async {
+  Future<void> _captureAndSubmit(bool checkIn, Future<XFile?> photoFuture) async {
+    final attempt = ++_attempt;
+    bool stale() => !mounted || attempt != _attempt;
     setState(() {
       _busy = true;
-      _lastError = null;
-      _status = 'Memeriksa persetujuan foto wajah...';
+      _waitingCamera = true;
+      _status = 'Ambil selfie wajah Anda...';
     });
     try {
-      if (!await _ensureConsent()) return;
-      setState(() => _status = 'Mengambil lokasi GPS...');
-      final pos = await LocationService.current();
-      setState(() => _status = 'Lokasi didapat (akurasi ${pos.accuracy.round()} m). Ambil selfie wajah Anda...');
-      final photo = await _takeSelfie();
+      final photo = await photoFuture;
+      if (stale()) return;
+      setState(() => _waitingCamera = false);
       if (photo == null) {
         setState(() => _lastError = 'Selfie dibatalkan. Absen membutuhkan foto wajah.');
         return;
       }
-      setState(() => _status = 'Memeriksa wajah & mengirim ke server...');
+      setState(() => _status = 'Mengambil lokasi GPS...');
+      final pos = await LocationService.current();
+      if (stale()) return;
+      final hint = LocationService.accuracyHint(pos);
+      if (hint != null) {
+        setState(() => _lastError = hint);
+        return;
+      }
+      setState(() => _status = 'Lokasi didapat (akurasi ${pos.accuracy.round()} m). Memeriksa wajah & mengirim...');
       final fields = LocationService.toPayload(pos, note: _note.text).map((k, v) => MapEntry(k, '$v'));
       final r = await _api.upload(
         checkIn ? '/attendance/check-in' : '/attendance/check-out',
         [(field: 'photo', filename: photo.name.isEmpty ? 'selfie.jpg' : photo.name, bytes: await photo.readAsBytes())],
         fields: fields,
       );
+      if (stale()) return;
       _note.clear();
       setState(() => _today = Attendance.fromJson(r['attendance'] as Map<String, dynamic>));
       if (mounted) showSnack(context, r['message'] as String? ?? 'Berhasil');
     } catch (e) {
+      if (stale()) return;
       var msg = e.toString();
       if (e is ApiException && e.data['code'] == 'FACE_REJECTED') msg = '$msg Silakan coba lagi.';
-      if (mounted) setState(() => _lastError = msg);
+      if (e is ApiException && e.data['code'] == 'FACE_CONSENT_REQUIRED') {
+        _consent = {...?_consent, 'required': true, 'consentedAt': null};
+        msg = 'Persetujuan foto wajah diperlukan. Ketuk tombol absen lagi.';
+      }
+      setState(() => _lastError = msg);
     } finally {
-      if (mounted) {
+      if (!stale()) {
         setState(() {
           _busy = false;
+          _waitingCamera = false;
           _status = null;
         });
       }
@@ -174,7 +228,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 ),
                 const SizedBox(height: 8),
                 FilledButton.icon(
-                  onPressed: _busy ? null : () => _submit(t == null),
+                  onPressed: _busy || _loading ? null : () => _onAbsenPressed(t == null),
                   icon: Icon(t == null ? Icons.login : Icons.logout),
                   label: Text(t == null ? 'Check-in (GPS + Selfie)' : 'Check-out (GPS + Selfie)'),
                   style: FilledButton.styleFrom(
@@ -201,6 +255,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                   const SizedBox(width: 12),
                   Expanded(child: Text(_status!)),
+                  if (_waitingCamera) TextButton(onPressed: _cancelAttempt, child: const Text('Batalkan')),
                 ]),
               ],
               if (_lastError != null) ...[
