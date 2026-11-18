@@ -21,7 +21,7 @@ const upload = multer({
   // oleh sharp (saveImage/saveSignature/checkSelfie): file yang bukan gambar tetap ditolak.
   fileFilter: (_req, file, cb) => {
     if (!/^image\/(jpeg|jpg|png|webp|heic|heif)$/.test(file.mimetype) && file.mimetype !== 'application/octet-stream') {
-      return cb(badRequest('Hanya file gambar JPG, PNG, WEBP, atau HEIC yang diizinkan'));
+      return cb(badRequest('Hanya file gambar JPG, PNG, atau WEBP yang diizinkan'));
     }
     cb(null, true);
   },
@@ -33,17 +33,26 @@ function dirFor(kind) {
   return dir;
 }
 
-/** Ambil jam pengambilan foto dari EXIF (HH:MM) bila ada. */
-async function exifTime(buffer) {
+/**
+ * Ambil waktu pemotretan dari data kamera (EXIF DateTimeOriginal/CreateDate) bila ada.
+ * Waktu kamera tidak menyimpan zona waktu; jam & tanggal diambil apa adanya (waktu setempat kamera).
+ * @returns {{time: string, date: string} | null}  time HH:MM, date YYYY-MM-DD
+ */
+async function exifDateTime(buffer) {
   try {
     const ex = await exifr.parse(buffer, ['DateTimeOriginal', 'CreateDate']);
     const d = ex && (ex.DateTimeOriginal || ex.CreateDate);
     if (d instanceof Date && !Number.isNaN(d.getTime())) {
-      // exifr membaca waktu kamera sebagai waktu lokal tanpa zona; ambil jam-menitnya apa adanya.
-      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      const p = (n) => String(n).padStart(2, '0');
+      return { time: `${p(d.getHours())}:${p(d.getMinutes())}`, date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` };
     }
   } catch (_) { /* EXIF tidak wajib */ }
   return null;
+}
+
+async function exifTime(buffer) {
+  const r = await exifDateTime(buffer);
+  return r ? r.time : null;
 }
 
 /**
@@ -58,7 +67,8 @@ async function saveImage(kind, buffer, { maxSize = 1600, format = 'jpeg' } = {})
     img = format === 'png' ? img.png({ compressionLevel: 9 }) : img.jpeg({ quality: 84, mozjpeg: true });
     buffer = await img.toBuffer();
   } catch (_) {
-    throw badRequest('File gambar rusak atau formatnya tidak didukung');
+    throw badRequest('File gambar rusak atau formatnya tidak didukung (gunakan JPG/PNG; foto HEIC iPhone: '
+      + 'Pengaturan > Kamera > Format > "Paling Kompatibel")');
   }
   const name = `${crypto.randomUUID()}.${format === 'png' ? 'png' : 'jpg'}`;
   await fs.promises.writeFile(path.join(dirFor(kind), name), buffer, { mode: 0o640 });
@@ -132,4 +142,4 @@ function verify(token, purpose) {
   }
 }
 
-module.exports = { upload, saveImage, saveSignature, filePath, removeFile, signFile, signPrint, verify, exifTime, UPLOAD_DIR };
+module.exports = { upload, saveImage, saveSignature, filePath, removeFile, signFile, signPrint, verify, exifTime, exifDateTime, UPLOAD_DIR };

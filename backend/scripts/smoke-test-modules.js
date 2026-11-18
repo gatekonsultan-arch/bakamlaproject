@@ -290,6 +290,46 @@ function expect(name, cond, info) {
   const list = (await call('GET', '/api/hse-reports', { token: sm })).body.reports;
   expect('daftar laporan untuk Site Manager', list.some((r) => r.id === rid && r.status === 'APPROVED'));
 
+  console.log('\n-- Jam foto otomatis (EXIF) & cuaca otomatis dari foto');
+  const ymd = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: process.env.APP_TIMEZONE || 'Asia/Jakarta' }).format(d);
+  const yday = ymd(new Date(Date.now() - 86400000));
+  const rep2 = await call('POST', '/api/hse-reports', { token: ho, body: { siteId: site.id, date: yday } });
+  expect('buat laporan kemarin', rep2.status === 201, rep2.body);
+  const r2 = rep2.body.id;
+  const exifJpg = (when, color) => sharp({ create: { width: 640, height: 480, channels: 3, background: color } }).jpeg()
+    .withExif({ IFD0: { Make: 'Apple', Model: 'iPhone' }, IFD2: { DateTimeOriginal: when } }).toBuffer();
+  const exd = (d) => `${d.replace(/-/g, ':')}`;
+  const fd2 = new FormData();
+  fd2.append('photos', new Blob([await exifJpg(`${exd(yday)} 08:12:30`, '#5b7f3a')], { type: 'application/octet-stream' }), 'IMG_0001.JPG');
+  fd2.append('photos', new Blob([await exifJpg(`${exd(yday)} 13:47:05`, '#8a6a3b')], { type: 'application/octet-stream' }), 'IMG_0002.JPG');
+  fd2.append('photos', new Blob([await sharp({ create: { width: 640, height: 480, channels: 3, background: '#4a6d8c' } }).jpeg().toBuffer()], { type: 'image/jpeg' }), 'whatsapp.jpg');
+  fd2.append('photos', new Blob([await exifJpg('2026:01:02 10:00:00', '#777')], { type: 'image/jpeg' }), 'IMG_lama.JPG');
+  fd2.append('takenTime', '20:59,20:59,15:30,20:59'); // jam file dari aplikasi (dipakai hanya bila tanpa EXIF)
+  const up2 = await call('POST', `/api/hse-reports/${r2}/photos`, { token: ho, form: fd2 });
+  const byName = (n) => up2.body.photos.find((p) => p.original === n);
+  expect('jam foto dibaca dari kamera (08:12 & 13:47), bukan jam upload', byName('IMG_0001.JPG')?.takenTime === '08:12' && byName('IMG_0002.JPG')?.takenTime === '13:47'
+    && byName('IMG_0001.JPG').timeSource === 'exif' && byName('IMG_0001.JPG').takenDate === yday, up2.body.photos);
+  expect('foto tanpa data kamera memakai jam file & ditandai perkiraan', byName('whatsapp.jpg')?.takenTime === '15:30' && byName('whatsapp.jpg').timeSource === 'file');
+  expect('foto dari tanggal lain diberi peringatan', byName('IMG_lama.JPG')?.dateMismatch === true && byName('IMG_0001.JPG').dateMismatch === false);
+  await call('PUT', `/api/hse-reports/${r2}/photos/${byName('IMG_0001.JPG').id}`, { token: ho, body: { sky: 'S' } });
+  await call('PUT', `/api/hse-reports/${r2}/photos/${byName('IMG_0002.JPG').id}`, { token: ho, body: { sky: 'L' } });
+  await call('PUT', `/api/hse-reports/${r2}/photos/${byName('IMG_lama.JPG').id}`, { token: ho, body: { included: false, sky: 'H' } });
+  let full2 = (await call('GET', `/api/hse-reports/${r2}`, { token: ho })).body;
+  const w = full2.weatherEffective;
+  expect('cuaca per jam otomatis dari foto terdekat (pagi cerah, siang hujan)', w[8]?.code === 'S' && w[10]?.code === 'S' && w[12]?.code === 'L' && w[16]?.code === 'L'
+    && w[8].source === 'photo', w);
+  expect('foto yang tidak masuk laporan tidak dipakai untuk cuaca', !Object.values(w).some((x) => x.code === 'H'));
+  await call('PUT', `/api/hse-reports/${r2}`, { token: ho, body: { content: { weather: { 10: 'C' } } } });
+  full2 = (await call('GET', `/api/hse-reports/${r2}`, { token: ho })).body;
+  expect('cuaca jam 10 diubah manual (Berawan), jam lain tetap otomatis', full2.weatherEffective[10].code === 'C' && full2.weatherEffective[10].source === 'manual'
+    && full2.weatherEffective[9].source === 'photo');
+  const tm = await call('PUT', `/api/hse-reports/${r2}/photos/${byName('whatsapp.jpg').id}`, { token: ho, body: { takenTime: '15:45' } });
+  const fixedPh = (await call('GET', `/api/hse-reports/${r2}`, { token: ho })).body.photos.find((p) => p.original === 'whatsapp.jpg');
+  expect('jam foto diubah manual', tm.status === 200 && fixedPh.takenTime === '15:45' && fixedPh.timeSource === 'manual', fixedPh);
+  const l2 = await call('POST', `/api/hse-reports/${r2}/print-link`, { token: ho, body: { lang: 'en' } });
+  const h2 = await (await fetch(BASE + l2.body.url)).text();
+  expect('cuaca otomatis ikut tercetak (Morning: Sunny, Afternoon: Light Rain)', /Morning: Sunny/.test(h2) && /Afternoon: Light Rain/.test(h2));
+
   console.log(failures ? `\n${failures} pengujian GAGAL` : '\nSemua pengujian lulus');
   process.exit(failures ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

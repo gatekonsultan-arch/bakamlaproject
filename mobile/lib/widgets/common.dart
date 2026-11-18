@@ -61,3 +61,58 @@ Future<void> openPrintPage(String url) async {
   final ok = await launchUrl(Uri.parse(url), webOnlyWindowName: iosWeb ? '_self' : '_blank');
   if (!ok) throw Exception('Tidak dapat membuka halaman cetak');
 }
+
+/// Kolom jam dengan pemilih jam (format 24 jam). Mengganti ketik manual "HH:MM" yang sulit di HP.
+class TimePickerField extends StatelessWidget {
+  final String? value;
+  final String label;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+  final double? width;
+  const TimePickerField({
+    super.key,
+    required this.value,
+    required this.label,
+    required this.onChanged,
+    this.enabled = true,
+    this.width,
+  });
+
+  static TimeOfDay? parse(String? v) {
+    final m = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(v ?? '');
+    return m == null ? null : TimeOfDay(hour: int.parse(m.group(1)!), minute: int.parse(m.group(2)!));
+  }
+
+  Future<void> _pick(BuildContext context) async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: parse(value) ?? TimeOfDay.now(),
+      helpText: label,
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
+    if (t != null) {
+      onChanged('${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: width,
+        child: InkWell(
+          onTap: enabled ? () => _pick(context) : null,
+          child: InputDecorator(
+            isEmpty: value == null || value!.isEmpty,
+            decoration: InputDecoration(
+              labelText: label,
+              isDense: true,
+              enabled: enabled,
+              suffixIcon: const Icon(Icons.schedule, size: 18),
+            ),
+            child: Text(value ?? ''),
+          ),
+        ),
+      );
+}

@@ -11,6 +11,7 @@ const { audit } = require('../utils/audit');
 const files = require('../utils/files');
 const lib = require('../reports/hseLibrary');
 const { buildHtml } = require('../reports/hsePrint');
+const weatherUtil = require('../utils/weather');
 
 const router = express.Router();
 
@@ -79,18 +80,24 @@ async function loadReport(reportId) {
 
 async function loadPhotos(reportId) {
   return db.rows(
-    `SELECT id, file_name, original, taken_time, activity_key, caption, sky, included, sort_order
+    `SELECT id, file_name, original, taken_time, taken_date, time_source, activity_key, caption, sky, included, sort_order
        FROM hse_report_photos WHERE report_id = :id
       ORDER BY NVL(taken_time, '99:99'), sort_order, id`,
     { id: reportId },
   );
 }
 
-const photoDto = (p) => ({
+const TIME_SOURCE_LABEL = { exif: 'dari kamera', file: 'perkiraan, periksa', manual: 'diubah manual' };
+const photoDto = (p, reportDate) => ({
   id: p.id,
   url: files.signFile('hse', p.fileName),
   original: p.original,
   takenTime: p.takenTime,
+  takenDate: p.takenDate,
+  timeSource: p.timeSource,
+  timeSourceLabel: TIME_SOURCE_LABEL[p.timeSource] || null,
+  // Foto diambil di tanggal lain dari tanggal laporan (mis. salah pilih foto kemarin)
+  dateMismatch: !!(reportDate && p.takenDate && p.takenDate !== reportDate),
   activityKey: p.activityKey,
   caption: p.caption,
   sky: p.sky,
@@ -147,15 +154,23 @@ function assertEditable(user, h) {
   }
 }
 
+/** Cuaca per jam yang berlaku: isian manual + otomatis dari foto (lihat utils/weather.js). */
+function effectiveWeatherOf(content, photos, start, finish) {
+  return weatherUtil.effectiveWeather({ manual: content.weather || {}, photos, start, finish });
+}
+
 /** Peta cuaca per tanggal dalam satu bulan (untuk tabel cuaca kumulatif). */
 async function weatherMonth(siteId, date) {
   const rows = await db.rows(
-    `SELECT TO_CHAR(report_date, 'YYYY-MM-DD') AS d, content FROM hse_reports
+    `SELECT id, TO_CHAR(report_date, 'YYYY-MM-DD') AS d, start_time, finish_time, content FROM hse_reports
       WHERE site_id = :siteId AND report_date BETWEEN TRUNC(TO_DATE(:d, 'YYYY-MM-DD'), 'MM') AND TO_DATE(:d, 'YYYY-MM-DD')`,
     { siteId, d: date },
   );
   const out = {};
-  rows.forEach((r) => { out[r.d] = (JSON.parse(r.content).weather) || {}; });
+  for (const r of rows) {
+    const photos = (await loadPhotos(r.id)).map((p) => ({ takenTime: p.takenTime, sky: p.sky, included: p.included === 1 }));
+    out[r.d] = weatherUtil.codes(effectiveWeatherOf(JSON.parse(r.content), photos, r.startTime, r.finishTime));
+  }
   return out;
 }
 
@@ -167,8 +182,9 @@ router.get('/:id/print', async (req, res) => {
   if (p.r !== reportId) throw forbidden();
   const h = await loadReport(reportId);
   const settings = await loadSettings(h.siteId);
-  const photos = (await loadPhotos(reportId)).map(photoDto);
+  const photos = (await loadPhotos(reportId)).map((p) => photoDto(p, h.reportDate));
   const members = await loadMembers(h, settings);
+  h.content.weather = weatherUtil.codes(effectiveWeatherOf(h.content, photos, h.startTime, h.finishTime));
   const nonce = require('crypto').randomBytes(16).toString('base64');
   const html = buildHtml({
     report: h,
@@ -345,6 +361,7 @@ router.post('/', requirePermission('writeHseReports'), async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
+  let photosForGet;
   const h = await loadReport(id.parse(req.params.id));
   assertSiteAccess(req.user, h.siteId);
   const settings = await loadSettings(h.siteId);
@@ -358,7 +375,8 @@ router.get('/:id', async (req, res) => {
       approvedByName: h.approvedByName, approvedAt: h.approvedAt, revisionNote: h.revisionNote,
       updatedAt: h.updatedAt,
     },
-    photos: (await loadPhotos(h.id)).map(photoDto),
+    photos: (photosForGet = (await loadPhotos(h.id)).map((p) => photoDto(p, h.reportDate))),
+    weatherEffective: effectiveWeatherOf(h.content, photosForGet, h.startTime, h.finishTime),
     members: await loadMembers(h, settings),
     settings: settingsDto(settings),
     actions: actionsFor(req.user, h),
@@ -444,20 +462,23 @@ router.post('/:id/photos', requirePermission('writeHseReports'), files.upload.ar
   const saved = [];
   let order = count.mx;
   for (const [i, f] of list.entries()) {
-    const exif = await files.exifTime(f.buffer);
+    // Jam & tanggal dari data kamera (EXIF). Tanpa EXIF (mis. foto kiriman WhatsApp) dipakai jam file
+    // dari aplikasi sebagai PERKIRAAN yang ditandai untuk diperiksa.
+    const exif = await files.exifDateTime(f.buffer);
     const fallback = /^([01]\d|2[0-3]):[0-5]\d$/.test(clientTimes[i] || '') ? clientTimes[i] : null;
     const name = await files.saveImage('hse', f.buffer);
     order += 1;
     await db.query(
-      `INSERT INTO hse_report_photos (report_id, file_name, original, taken_time, caption, sort_order, uploaded_by)
-       VALUES (:r, :f, :o, :t, :c, :s, :u)`,
-      { r: reportId, f: name, o: String(f.originalname || '').slice(0, 255), t: exif || fallback,
+      `INSERT INTO hse_report_photos (report_id, file_name, original, taken_time, taken_date, time_source, caption, sort_order, uploaded_by)
+       VALUES (:r, :f, :o, :t, :td, :ts, :c, :s, :u)`,
+      { r: reportId, f: name, o: String(f.originalname || '').slice(0, 255),
+        t: exif?.time || fallback, td: exif?.date || null, ts: exif ? 'exif' : fallback ? 'file' : null,
         c: lib.ACTIVITIES.custom.c, s: order, u: req.user.id },
     );
     saved.push(name);
   }
   await audit(req.user.id, 'HSE_PHOTO_UPLOAD', `report=${reportId} n=${saved.length}`, req.ip);
-  res.status(201).json({ photos: (await loadPhotos(reportId)).map(photoDto) });
+  res.status(201).json({ photos: (await loadPhotos(reportId)).map((p) => photoDto(p, h.reportDate)) });
 });
 
 const photoUpdate = z.object({
@@ -486,6 +507,7 @@ router.put('/:id/photos/:photoId', requirePermission('writeHseReports'), async (
     }
   }
   if (!sets.length) throw badRequest('Tidak ada perubahan');
+  if (d.takenTime !== undefined) sets.push("time_source = 'manual'");
   const r = await db.query(`UPDATE hse_report_photos SET ${sets.join(', ')} WHERE id = :id AND report_id = :r`, binds);
   if (r.rowsAffected !== 1) throw notFound('Foto tidak ditemukan');
   res.json({ message: 'Foto diperbarui' });

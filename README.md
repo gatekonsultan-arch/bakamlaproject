@@ -20,7 +20,7 @@ Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpa
 
 | Folder      | Isi |
 |-------------|-----|
-| `database/` | Skema Oracle: absensi (01), role (02), material (03), laporan K3 (04), tanda tangan (05), tenaga kerja & upah (06), selfie (07), material submission & ATP (08) |
+| `database/` | Skema Oracle: absensi (01), role (02), material (03), laporan K3 (04), tanda tangan (05), tenaga kerja & upah (06), selfie (07), material submission & ATP (08), jam foto (09) |
 | `backend/`  | REST API (Node.js, Express, node-oracledb mode *thin* — tanpa Instant Client) |
 | `mobile/`   | Aplikasi Flutter (web + Android + iOS) |
 | `deploy/`   | Docker Compose (Oracle + API), konfigurasi Nginx, skrip backup |
@@ -101,7 +101,12 @@ Formulir *Material Purchase Submission & Approval* menyatu dengan alur **Pembeli
 
 - Format mengikuti laporan proyek: kop, uraian kegiatan, lampiran foto, site plan, tabel cuaca per jam sebulan, bagian **A–J**, dan lembar persetujuan bertanda tangan.
 - **Anggota tim & man-hours terisi otomatis** dari absensi di lokasi itu pada hari tersebut, ditambah personel tanpa akun dari pengaturan.
-- Foto diunggah dari HP/komputer. Jam foto diambil dari EXIF, lalu foto diperkecil dan **metadata GPS dihapus**. Aktivitas dipilih per foto dari pustaka aktivitas.
+- Foto diunggah **utuh** dari HP/komputer, sehingga **jam dan tanggal pemotretan dibaca otomatis dari data kamera (EXIF)**, bukan jam upload. Setelah itu server memperkecil foto dan **menghapus metadata GPS**.
+  - Setiap foto diberi tanda asal jam: *dari kamera*, *perkiraan, periksa* (foto tanpa data kamera, mis. kiriman WhatsApp, memakai jam file), atau *diubah manual*.
+  - Foto yang diambil di tanggal lain dari tanggal laporan diberi peringatan.
+  - Jam diubah lewat **pemilih jam**. Aktivitas yang berasal dari foto ikut menyesuaikan jamnya.
+  - Aktivitas dipilih per foto dari pustaka aktivitas.
+- **Cuaca per jam terisi otomatis** dari "Cuaca di foto" pada foto yang jamnya paling dekat (`backend/src/utils/weather.js`). Setiap jam tetap bisa diubah manual atau dikembalikan ke "Otomatis". Hasilnya masuk ke ringkasan cuaca dan tabel cuaca bulanan di PDF. Tidak memakai layanan cuaca luar.
 - Alur: **Draf → Dikirim → Diketahui PIC Site → Disetujui HSE Manager**. Laporan dapat dikembalikan untuk revisi dengan catatan. Setelah dikirim, laporan terkunci.
 - **Tanda tangan digital wajib**: tiap penanda tangan (HSE Officer, PIC Site, HSE Manager) harus mengunggah tanda tangan, dengan digambar di aplikasi atau unggah foto/scan. Tanpa tanda tangan, server menolak Kirim, Mengetahui, dan Setujui. Latar putih otomatis dibuat transparan. Tanda tangan **dibekukan** pada laporan saat ditandatangani, sehingga laporan yang sudah disetujui tidak berubah meskipun tanda tangan diganti kemudian.
 - **Logo kop bawaan: PRIMA (kiri) & SRT (kanan)** (`backend/assets/logos/`). Logo ini otomatis dipakai semua lokasi; untuk mengganti logo khusus satu lokasi, unggah di ⚙ Pengaturan Laporan. Kontraktor bawaan: PT Prima Integra Utama.
