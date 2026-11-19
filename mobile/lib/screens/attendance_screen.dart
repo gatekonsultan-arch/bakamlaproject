@@ -5,6 +5,7 @@ import '../main.dart';
 import '../models/models.dart';
 import '../services/api.dart';
 import '../services/location.dart';
+import '../widgets/camera_input.dart';
 import '../widgets/common.dart';
 
 class AttendanceScreen extends StatefulWidget {
@@ -103,9 +104,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ]),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
-            FilledButton(
-              onPressed: agree ? () => Navigator.pop(ctx, _takeSelfie()) : null,
-              child: const Text('Lanjut & ambil selfie'),
+            // Web (termasuk iPhone): tombol ini dilapisi input kamera HTML asli agar kamera pasti terbuka.
+            NativeCameraOverlay(
+              enabled: agree && nativeCameraSupported,
+              onPicked: (bytes, name) => Navigator.pop(ctx, Future.value(XFile.fromData(bytes, name: name))),
+              child: FilledButton(
+                onPressed: agree ? () => Navigator.pop(ctx, _takeSelfie()) : null,
+                child: const Text('Lanjut & ambil selfie'),
+              ),
             ),
           ],
         ),
@@ -300,13 +306,21 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       labelText: 'Catatan (opsional)', border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 8),
-                FilledButton.icon(
-                  onPressed: _busy || _loading ? null : () => _onAbsenPressed(t == null),
-                  icon: Icon(t == null ? Icons.login : Icons.logout),
-                  label: Text(t == null ? 'Check-in (GPS + Selfie)' : 'Check-out (GPS + Selfie)'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(56),
-                    backgroundColor: t == null ? null : cs.tertiary,
+                // Web: ketukan langsung mengenai input kamera HTML asli di atas tombol (wajib untuk iPhone).
+                // Bila persetujuan foto wajah belum ada, tombol membuka dialog persetujuan dulu.
+                NativeCameraOverlay(
+                  enabled: nativeCameraSupported && !_busy && !_loading && !_needConsent,
+                  onTapStart: () => setState(() => _lastError = null),
+                  onPicked: (bytes, name) =>
+                      _captureAndSubmit(t == null, Future.value(XFile.fromData(bytes, name: name))),
+                  child: FilledButton.icon(
+                    onPressed: _busy || _loading ? null : () => _onAbsenPressed(t == null),
+                    icon: Icon(t == null ? Icons.login : Icons.logout),
+                    label: Text(t == null ? 'Check-in (GPS + Selfie)' : 'Check-out (GPS + Selfie)'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(56),
+                      backgroundColor: t == null ? null : cs.tertiary,
+                    ),
                   ),
                 ),
               ] else

@@ -46,6 +46,9 @@ class ProfileScreen extends StatelessWidget {
             icon: const Icon(Icons.logout),
             label: const Text('Keluar'),
           ),
+          const SizedBox(height: 16),
+          Text('Versi aplikasi: $appVersion',
+              textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12)),
         ]),
       ),
     ]);

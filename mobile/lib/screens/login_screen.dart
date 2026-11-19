@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../config.dart';
 import '../main.dart';
 import '../widgets/common.dart';
 
@@ -56,6 +57,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 4),
                   Text('Masuk dengan akun yang diberikan admin',
                       textAlign: TextAlign.center, style: TextStyle(color: cs.outline)),
+                  Text('Versi $appVersion',
+                      textAlign: TextAlign.center, style: TextStyle(color: cs.outline, fontSize: 11)),
                   const SizedBox(height: 32),
                   TextFormField(
                     controller: _user,

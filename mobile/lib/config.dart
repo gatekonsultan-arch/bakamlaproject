@@ -2,6 +2,9 @@
 ///   flutter build web --dart-define=API_URL=https://absensi.domainanda.com
 ///   flutter build apk --dart-define=API_URL=https://absensi.domainanda.com
 /// Default kosong = API satu domain dengan aplikasi web (via Nginx).
+/// Versi aplikasi yang tampil di halaman login & Profil — untuk memastikan server sudah memakai versi terbaru.
+const String appVersion = '2026.11.19 (kamera iPhone + approval absen)';
+
 const String apiBaseUrl = String.fromEnvironment('API_URL', defaultValue: '');
 
 const Map<String, String> roleLabels = {
