@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 final fmtTime = DateFormat('HH:mm', 'id_ID');
 final fmtDate = DateFormat('EEEE, d MMM yyyy', 'id_ID');
@@ -50,3 +52,94 @@ class EmptyState extends StatelessWidget {
         ]),
       );
 }
+
+/// Membuka halaman cetak/PDF. Di iPhone (Safari/Chrome) tab baru yang dibuka setelah menunggu
+/// server diblokir sebagai pop-up, jadi di sana halaman dibuka di tab yang sama
+/// (kembali ke aplikasi dengan tombol Back).
+Future<void> openPrintPage(String url) async {
+  final iosWeb = kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+  final ok = await launchUrl(Uri.parse(url), webOnlyWindowName: iosWeb ? '_self' : '_blank');
+  if (!ok) throw Exception('Tidak dapat membuka halaman cetak');
+}
+
+/// Kolom jam dengan pemilih jam (format 24 jam). Mengganti ketik manual "HH:MM" yang sulit di HP.
+class TimePickerField extends StatelessWidget {
+  final String? value;
+  final String label;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+  final double? width;
+  const TimePickerField({
+    super.key,
+    required this.value,
+    required this.label,
+    required this.onChanged,
+    this.enabled = true,
+    this.width,
+  });
+
+  static TimeOfDay? parse(String? v) {
+    final m = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(v ?? '');
+    return m == null ? null : TimeOfDay(hour: int.parse(m.group(1)!), minute: int.parse(m.group(2)!));
+  }
+
+  Future<void> _pick(BuildContext context) async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: parse(value) ?? TimeOfDay.now(),
+      helpText: label,
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
+    if (t != null) {
+      onChanged('${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: width,
+        child: InkWell(
+          onTap: enabled ? () => _pick(context) : null,
+          child: InputDecorator(
+            isEmpty: value == null || value!.isEmpty,
+            decoration: InputDecoration(
+              labelText: label,
+              isDense: true,
+              enabled: enabled,
+              suffixIcon: const Icon(Icons.schedule, size: 18),
+            ),
+            child: Text(value ?? ''),
+          ),
+        ),
+      );
+}
+
+/// Label status pengakuan kehadiran (absen di luar area perlu persetujuan PM / Site Manager).
+class ApprovalBadge extends StatelessWidget {
+  final String status;
+  final String label;
+  const ApprovalBadge(this.status, this.label, {super.key});
+
+  static const colors = {
+    'PENDING': Color(0xFFEF6C00),
+    'APPROVED': Color(0xFF2E7D32),
+    'REJECTED': Color(0xFFC62828),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final c = colors[status] ?? Colors.grey;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: c.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
+      child: Text(label, style: TextStyle(color: c, fontWeight: FontWeight.w600, fontSize: 12)),
+    );
+  }
+}
+
+/// Buka titik GPS di Google Maps (untuk memeriksa lokasi absen di luar area).
+Future<void> openMap(double lat, double lng) =>
+    launchUrl(Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng'), mode: LaunchMode.externalApplication);

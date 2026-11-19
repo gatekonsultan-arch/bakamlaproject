@@ -160,7 +160,7 @@ class _HseSettingsScreenState extends State<HseSettingsScreen> {
                 ),
               const SizedBox(height: 8),
               Text('Logo & site plan dasar', style: Theme.of(context).textTheme.titleMedium),
-              for (final slot in const [('logoL', 'Logo kiri (kontraktor)'), ('logoR', 'Logo kanan'), ('site', 'Site plan dasar')])
+              for (final slot in const [('logoL', 'Logo kiri (PRIMA)'), ('logoR', 'Logo kanan (SRT)'), ('site', 'Site plan dasar')])
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: SizedBox(
@@ -171,6 +171,9 @@ class _HseSettingsScreenState extends State<HseSettingsScreen> {
                         : Image.network(Api.instance.abs((s['imgUrl'] as Map)[slot.$1] as String), fit: BoxFit.contain),
                   ),
                   title: Text(slot.$2),
+                  subtitle: ((s['imgDefault'] as Map?)?[slot.$1] == true)
+                      ? const Text('Logo bawaan (otomatis). Unggah untuk mengganti khusus lokasi ini.', style: TextStyle(fontSize: 12))
+                      : null,
                   trailing: OutlinedButton(onPressed: () => _upload(slot.$1), child: const Text('Unggah')),
                 ),
             ],

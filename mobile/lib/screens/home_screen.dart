@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../main.dart';
+import 'approvals_screen.dart';
 import 'attendance_screen.dart';
 import 'history_screen.dart';
 import 'hse_reports_screen.dart';
+import 'atp_screen.dart';
 import 'materials_screen.dart';
 import 'workers_screen.dart';
 import 'profile_screen.dart';
@@ -32,9 +34,11 @@ class _HomeScreenState extends State<HomeScreen> {
   List<_Dest> _destinations(String role) => [
         const _Dest('Absen', Icons.fingerprint, AttendanceScreen()),
         const _Dest('Riwayat', Icons.history, HistoryScreen()),
+        if (canApproveAttendance(role)) const _Dest('Approval', Icons.how_to_reg_outlined, ApprovalsScreen()),
         if (canViewHseReports(role)) const _Dest('Laporan K3', Icons.health_and_safety_outlined, HseReportsScreen()),
         if (canViewMaterials(role)) const _Dest('Material', Icons.inventory_2_outlined, MaterialsScreen()),
         if (canViewWorkers(role)) const _Dest('Tenaga Kerja', Icons.engineering_outlined, WorkersScreen()),
+        if (canViewAtp(role)) const _Dest('ATP Mutu', Icons.fact_check_outlined, AtpScreen()),
         if (canViewReports(role)) const _Dest('Rekap Absen', Icons.assessment_outlined, ReportScreen()),
         if (canManageUsers(role)) const _Dest('Pengguna', Icons.group_outlined, UsersScreen()),
         if (canManageSites(role)) const _Dest('Lokasi', Icons.place_outlined, SitesScreen()),

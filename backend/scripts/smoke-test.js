@@ -82,7 +82,7 @@ function expect(name, cond, info) {
   const atSite = { latitude: -5.0619, longitude: 119.4735, accuracy: 12 };
 
   const far = await postAttendance(BASE, IN, logTok, { latitude: -5.08, longitude: 119.48, accuracy: 10 }, await selfie());
-  expect('check-in di luar radius ditolak 422', far.status === 422 && far.body.distanceM > 150, far.body);
+  expect('check-in di luar radius tanpa keterangan ditolak 422 OUTSIDE_AREA', far.status === 422 && far.body.code === 'OUTSIDE_AREA' && far.body.distanceM > 150, far.body);
 
   const mock = await postAttendance(BASE, IN, logTok, { ...atSite, isMocked: true }, await selfie());
   expect('mock location ditolak 422', mock.status === 422);

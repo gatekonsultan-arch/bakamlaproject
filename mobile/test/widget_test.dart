@@ -35,4 +35,20 @@ void main() {
     expect(canViewWorkers('LOGISTIK'), isFalse);
     expect(canViewWorkers('HSE_OFFICER'), isFalse);
   });
+
+  test('ATP: Site Manager menyusun, PM menyetujui, HSE/Logistik tidak', () {
+    expect(canWriteAtp('SITE_MANAGER'), isTrue);
+    expect(canWriteAtp('PROJECT_MANAGER'), isFalse);
+    expect(canViewAtp('PROJECT_MANAGER'), isTrue);
+    expect(canViewAtp('HSE_OFFICER'), isFalse);
+    expect(canViewAtp('LOGISTIK'), isFalse);
+  });
+
+  test('approval absen luar area: PM & Site Manager', () {
+    expect(canApproveAttendance('PROJECT_MANAGER'), isTrue);
+    expect(canApproveAttendance('SITE_MANAGER'), isTrue);
+    expect(canApproveAttendance('SUPERADMIN'), isTrue);
+    expect(canApproveAttendance('HSE_MANAGER'), isFalse);
+    expect(canApproveAttendance('LOGISTIK'), isFalse);
+  });
 }

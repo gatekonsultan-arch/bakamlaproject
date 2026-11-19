@@ -78,12 +78,43 @@ class GeoPoint {
   final double? distanceM;
   final String? photoUrl;
 
-  GeoPoint(this.at, this.latitude, this.longitude, this.accuracy, this.distanceM, [this.photoUrl]);
+  /// Absen dilakukan di luar radius lokasi kerja (perlu persetujuan PM / Site Manager).
+  final bool outside;
+
+  /// Keterangan karyawan saat absen di luar area.
+  final String? reason;
+
+  GeoPoint(this.at, this.latitude, this.longitude, this.accuracy, this.distanceM,
+      [this.photoUrl, this.outside = false, this.reason]);
 
   static GeoPoint? fromJson(Map<String, dynamic>? j) => j == null || j['at'] == null
       ? null
       : GeoPoint(_date(j['at'])!, _num(j['latitude'])!, _num(j['longitude'])!,
-          _num(j['accuracy']), _num(j['distanceM']), j['photoUrl'] as String?);
+          _num(j['accuracy']), _num(j['distanceM']), j['photoUrl'] as String?,
+          j['outside'] == true, j['reason'] as String?);
+}
+
+/// Status pengakuan kehadiran: PENDING (absen di luar area, menunggu), APPROVED, REJECTED.
+class Approval {
+  final String status;
+  final String label;
+  final String? byName;
+  final String? byRole;
+  final DateTime? at;
+  final String? note;
+
+  const Approval(this.status, this.label, {this.byName, this.byRole, this.at, this.note});
+
+  static Approval fromJson(Map<String, dynamic>? j) => j == null
+      ? const Approval('APPROVED', 'Diakui hadir')
+      : Approval(j['status'] as String, j['label'] as String,
+          byName: j['byName'] as String?,
+          byRole: j['byRole'] as String?,
+          at: _date(j['at']),
+          note: j['note'] as String?);
+
+  bool get pending => status == 'PENDING';
+  bool get rejected => status == 'REJECTED';
 }
 
 class Attendance {
@@ -96,6 +127,11 @@ class Attendance {
   final GeoPoint checkIn;
   final GeoPoint? checkOut;
   final String? note;
+  final int? siteRadiusM;
+  final Approval approval;
+
+  /// Hanya dari daftar approval: user ini boleh menyetujui / menolak.
+  final bool canDecide;
 
   Attendance({
     required this.id,
@@ -107,6 +143,9 @@ class Attendance {
     required this.checkIn,
     this.checkOut,
     this.note,
+    this.siteRadiusM,
+    this.approval = const Approval('APPROVED', 'Diakui hadir'),
+    this.canDecide = false,
   });
 
   factory Attendance.fromJson(Map<String, dynamic> j) => Attendance(
@@ -119,7 +158,12 @@ class Attendance {
         checkIn: GeoPoint.fromJson(j['checkIn'] as Map<String, dynamic>)!,
         checkOut: GeoPoint.fromJson(j['checkOut'] as Map<String, dynamic>?),
         note: j['note'] as String?,
+        siteRadiusM: j['siteRadiusM'] as int?,
+        approval: Approval.fromJson(j['approval'] as Map<String, dynamic>?),
+        canDecide: j['canDecide'] == true,
       );
+
+  bool get outside => checkIn.outside || (checkOut?.outside ?? false);
 
   Duration? get workDuration => checkOut?.at.difference(checkIn.at);
 }

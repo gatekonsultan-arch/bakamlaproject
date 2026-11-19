@@ -42,6 +42,11 @@ function expect(name, cond, info) {
   const ho = await mk('HSE_OFFICER');
   const hm = await mk('HSE_MANAGER');
 
+  // Tanda tangan (wajib untuk menyetujui pembelian & laporan)
+  const sigBuf = await sharp({ create: { width: 300, height: 100, channels: 3, background: '#fff' } })
+    .composite([{ input: Buffer.from('<svg width="300" height="100"><path d="M20 70 Q 100 10 160 60 T 280 40" stroke="#123" stroke-width="5" fill="none"/></svg>') }]).png().toBuffer();
+  const giveSig = async (tok) => { const f = new FormData(); f.append('file', new Blob([sigBuf], { type: 'image/png' }), 's.png'); return call('POST', '/api/hse-reports/me/signature', { token: tok, form: f }); };
+
   console.log('\n-- Material');
   const cat = await call('POST', '/api/materials/catalog', { token: pm, body: { code: `SEM-${sfx}`, name: 'Semen Portland 50kg', unit: 'sak', category: 'Struktur' } });
   expect('PM tambah katalog material', cat.status === 201, cat.body);
@@ -68,6 +73,9 @@ function expect(name, cond, info) {
   expect('pesan sebelum approve ditolak (409)', orderEarly.status === 409);
   const rejectNoNote = await call('POST', `/api/purchase-requests/${prId}/reject`, { token: pm, body: {} });
   expect('tolak tanpa alasan ditolak (400)', rejectNoNote.status === 400);
+  const apprNoSig = await call('POST', `/api/purchase-requests/${prId}/approve`, { token: pm, body: { note: 'OK' } });
+  expect('PM tanpa tanda tangan tidak bisa menyetujui (422)', apprNoSig.status === 422 && apprNoSig.body.code === 'SIGNATURE_REQUIRED', apprNoSig.body);
+  await giveSig(pm);
   const appr = await call('POST', `/api/purchase-requests/${prId}/approve`, { token: pm, body: { note: 'OK' } });
   expect('PM approve', appr.status === 200, appr.body);
   const appr2 = await call('POST', `/api/purchase-requests/${prId}/approve`, { token: pm, body: {} });
@@ -107,11 +115,61 @@ function expect(name, cond, info) {
   const cancel = await call('POST', `/api/purchase-requests/${pr2.body.request.id}/cancel`, { token: lg });
   expect('pembuat bisa batalkan PR yang disetujui', cancel.status === 200, cancel.body);
 
+  console.log('\n-- Material Submission (persetujuan per item)');
+  const cat2 = (await call('POST', '/api/materials/catalog', { token: pm, body: { code: `CAT-${sfx}`, name: 'Cat Tembok Eksterior', unit: 'pail' } })).body.material;
+  const plan2 = (await call('POST', '/api/materials/plans', { token: pm, body: { siteId: site.id, materialId: cat2.id, plannedQty: 20 } })).body.plan;
+  const cat3 = (await call('POST', '/api/materials/catalog', { token: pm, body: { code: `KRM-${sfx}`, name: 'Keramik 40x40', unit: 'dus' } })).body.material;
+  const plan3 = (await call('POST', '/api/materials/plans', { token: pm, body: { siteId: site.id, materialId: cat3.id, plannedQty: 100 } })).body.plan;
+  const msub = await call('POST', '/api/purchase-requests', { token: lg, body: { siteId: site.id, category: 'Finishing',
+    items: [{ siteMaterialId: plan2.id, qty: 10, brand: 'Dulux', spec: 'Weathershield 20L, putih' }, { siteMaterialId: plan3.id, qty: 50, brand: 'Merek X', spec: 'KW2' }] } });
+  expect('Logistik ajukan dengan merek & spesifikasi', msub.status === 201 && msub.body.items[0].brand === 'Dulux' && msub.body.request.category === 'Finishing', msub.body);
+  const subId = msub.body.request.id;
+  const [it1, it2] = msub.body.items;
+  const pfd = new FormData();
+  pfd.append('photo', new Blob([await sharp({ create: { width: 400, height: 300, channels: 3, background: '#2a6' } }).jpeg().toBuffer()], { type: 'image/jpeg' }), 'label.jpg');
+  const ph = await call('POST', `/api/purchase-requests/${subId}/items/${it1.id}/photo`, { token: lg, form: pfd });
+  expect('foto label material per item', ph.status === 200 && ph.body.photoUrl, ph.body);
+  const noReason = await call('POST', `/api/purchase-requests/${subId}/decide`, { token: pm, body: { items: [{ itemId: it1.id, decision: 'APPROVE' }, { itemId: it2.id, decision: 'REJECT' }] } });
+  expect('tolak item tanpa alasan ditolak (400)', noReason.status === 400, noReason.body);
+  const partial = await call('POST', `/api/purchase-requests/${subId}/decide`, { token: pm, body: { items: [{ itemId: it1.id, decision: 'APPROVE' }] } });
+  expect('keputusan harus untuk semua item (400)', partial.status === 400);
+  const dec = await call('POST', `/api/purchase-requests/${subId}/decide`, { token: pm, body: { items: [
+    { itemId: it1.id, decision: 'APPROVE' }, { itemId: it2.id, decision: 'REJECT', note: 'KW2 tidak sesuai spesifikasi, ganti KW1' }] } });
+  expect('PM setujui 1 item, tolak 1 item', dec.status === 200 && dec.body.approved === 1 && dec.body.rejected === 1, dec.body);
+  const sd = (await call('GET', `/api/purchase-requests/${subId}`, { token: lg })).body;
+  expect('status permintaan APPROVED; item ditolak tercatat alasannya', sd.request.status === 'APPROVED'
+    && sd.items.find((i) => i.id === it2.id).itemStatus === 'REJECTED' && /KW1/.test(sd.items.find((i) => i.id === it2.id).decisionNote), sd.items);
+  const p3 = (await call('GET', `/api/materials/plans/${plan3.id}`, { token: pm })).body.plan;
+  expect('item ditolak tidak dihitung sebagai sedang dipesan', p3.onOrder === 0 && p3.pending === 0, p3);
+  const p2 = (await call('GET', `/api/materials/plans/${plan2.id}`, { token: pm })).body.plan;
+  expect('item disetujui dihitung sedang dipesan', p2.onOrder === 10, p2);
+  await call('POST', `/api/purchase-requests/${subId}/order`, { token: lg, body: { supplier: 'Toko Cat' } });
+  const recvRej = await call('POST', `/api/purchase-requests/${subId}/receive`, { token: lg, body: { items: [{ itemId: it2.id, qty: 1 }] } });
+  expect('item ditolak tidak boleh diterima (422)', recvRej.status === 422, recvRej.body);
+  const recvOk = await call('POST', `/api/purchase-requests/${subId}/receive`, { token: lg, body: { items: [{ itemId: it1.id, qty: 10 }] } });
+  expect('item disetujui diterima lengkap -> RECEIVED', recvOk.body.status === 'RECEIVED', recvOk.body);
+  const msaLink = await call('POST', `/api/purchase-requests/${subId}/print-link`, { token: lg });
+  const msa = await (await fetch(BASE + msaLink.body.url)).text();
+  expect('formulir Material Submission tercetak sesuai format', ['MATERIAL PURCHASE SUBMISSION &amp; APPROVAL FORM', 'Dulux', 'Weathershield', 'KW2 tidak sesuai', '☑ Approve', '☑ Reject', 'logo-prima.png', 'logo-srt.png'].every((x) => msa.includes(x)));
+  expect('tanda tangan PM di kolom APPROVED BY', (msa.match(/\/api\/files\/signatures\//g) || []).length >= 1);
+  const allRej = await call('POST', '/api/purchase-requests', { token: lg, body: { siteId: site.id, items: [{ siteMaterialId: plan3.id, qty: 5, brand: 'Y' }] } });
+  await call('POST', `/api/purchase-requests/${allRej.body.request.id}/decide`, { token: pm, body: { items: [{ itemId: allRej.body.items[0].id, decision: 'REJECT', note: 'Merek tidak dikenal' }] } });
+  expect('semua item ditolak -> REJECTED', (await call('GET', `/api/purchase-requests/${allRej.body.request.id}`, { token: lg })).body.request.status === 'REJECTED');
+
   console.log('\n-- Laporan Harian K3');
   // Absen HSE Officer di lokasi -> otomatis jadi anggota tim laporan
   await consent(BASE, ho);
   const hoIn = await postAttendance(BASE, '/api/attendance/check-in', ho, { latitude: -5.06, longitude: 119.47, accuracy: 10 }, await selfie());
   expect('HSE Officer check-in (selfie)', hoIn.status === 201, hoIn.body);
+  const fresh = (await call('GET', `/api/hse-reports/settings/${site.id}`, { token: hm })).body.settings;
+  expect('lokasi baru otomatis memakai logo bawaan PRIMA (kiri) & SRT (kanan)',
+    fresh.imgUrl.logoL === '/api/files/default/logo-prima.png' && fresh.imgUrl.logoR === '/api/files/default/logo-srt.png'
+    && fresh.imgDefault.logoL && fresh.con === 'PT Prima Integra Utama', fresh.imgUrl);
+  for (const u of [fresh.imgUrl.logoL, fresh.imgUrl.logoR]) {
+    const r = await fetch(BASE + u);
+    expect(`logo bawaan bisa dibuka (${u.split('/').pop()})`, r.status === 200 && (r.headers.get('content-type') || '').includes('image/png'));
+  }
+  expect('nama file lain di folder logo bawaan ditolak (404)', (await fetch(`${BASE}/api/files/default/..%2F..%2Fpackage.json`)).status === 404);
   const sett = await call('PUT', `/api/hse-reports/settings/${site.id}`, { token: hm, body: { con: 'PT Kontraktor Uji', loc: 'Site Uji, Makassar', start: '2026-11-01', pm: 'Nama PM', members: [['Operator Satu', 'Heavy Equipment Operator']] } });
   expect('HSE Manager atur pengaturan laporan lokasi', sett.status === 200, sett.body);
   const noRep = await call('POST', '/api/hse-reports', { token: lg, body: { siteId: site.id } });
@@ -222,7 +280,8 @@ function expect(name, cond, info) {
   const html = await (await fetch(BASE + link.body.url)).text();
   expect('dokumen cetak berisi bagian A-J', ['A. PROJECT INFORMATION', 'E. WORK ACTIVITIES', 'F. INCIDENT', 'G. CUMULATIVE HSE STATISTICS', 'J. APPROVAL', 'EXCAVATION WORKS', 'WEATHER MONITORING'].every((s) => html.includes(s)));
   expect('dokumen disetujui tanpa watermark DRAF', !html.includes('class="draft"'));
-  expect('logo perusahaan tampil di kop', /class="lg"><img src="\/api\/files\/settings\//.test(html));
+  expect('logo kiri unggahan lokasi tampil di kop', /class="lg"><img src="\/api\/files\/settings\//.test(html));
+  expect('logo kanan tetap logo bawaan SRT', html.includes('<img src="/api/files/default/logo-srt.png"'));
   expect('3 tanda tangan tampil di lembar persetujuan', (html.match(/\/api\/files\/signatures\//g) || []).length >= 3);
   const badPrint = await fetch(`${BASE}/api/hse-reports/${rid}/print?t=palsu`);
   expect('cetak tanpa token valid ditolak 401', badPrint.status === 401);
@@ -230,6 +289,46 @@ function expect(name, cond, info) {
 
   const list = (await call('GET', '/api/hse-reports', { token: sm })).body.reports;
   expect('daftar laporan untuk Site Manager', list.some((r) => r.id === rid && r.status === 'APPROVED'));
+
+  console.log('\n-- Jam foto otomatis (EXIF) & cuaca otomatis dari foto');
+  const ymd = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: process.env.APP_TIMEZONE || 'Asia/Jakarta' }).format(d);
+  const yday = ymd(new Date(Date.now() - 86400000));
+  const rep2 = await call('POST', '/api/hse-reports', { token: ho, body: { siteId: site.id, date: yday } });
+  expect('buat laporan kemarin', rep2.status === 201, rep2.body);
+  const r2 = rep2.body.id;
+  const exifJpg = (when, color) => sharp({ create: { width: 640, height: 480, channels: 3, background: color } }).jpeg()
+    .withExif({ IFD0: { Make: 'Apple', Model: 'iPhone' }, IFD2: { DateTimeOriginal: when } }).toBuffer();
+  const exd = (d) => `${d.replace(/-/g, ':')}`;
+  const fd2 = new FormData();
+  fd2.append('photos', new Blob([await exifJpg(`${exd(yday)} 08:12:30`, '#5b7f3a')], { type: 'application/octet-stream' }), 'IMG_0001.JPG');
+  fd2.append('photos', new Blob([await exifJpg(`${exd(yday)} 13:47:05`, '#8a6a3b')], { type: 'application/octet-stream' }), 'IMG_0002.JPG');
+  fd2.append('photos', new Blob([await sharp({ create: { width: 640, height: 480, channels: 3, background: '#4a6d8c' } }).jpeg().toBuffer()], { type: 'image/jpeg' }), 'whatsapp.jpg');
+  fd2.append('photos', new Blob([await exifJpg('2026:01:02 10:00:00', '#777')], { type: 'image/jpeg' }), 'IMG_lama.JPG');
+  fd2.append('takenTime', '20:59,20:59,15:30,20:59'); // jam file dari aplikasi (dipakai hanya bila tanpa EXIF)
+  const up2 = await call('POST', `/api/hse-reports/${r2}/photos`, { token: ho, form: fd2 });
+  const byName = (n) => up2.body.photos.find((p) => p.original === n);
+  expect('jam foto dibaca dari kamera (08:12 & 13:47), bukan jam upload', byName('IMG_0001.JPG')?.takenTime === '08:12' && byName('IMG_0002.JPG')?.takenTime === '13:47'
+    && byName('IMG_0001.JPG').timeSource === 'exif' && byName('IMG_0001.JPG').takenDate === yday, up2.body.photos);
+  expect('foto tanpa data kamera memakai jam file & ditandai perkiraan', byName('whatsapp.jpg')?.takenTime === '15:30' && byName('whatsapp.jpg').timeSource === 'file');
+  expect('foto dari tanggal lain diberi peringatan', byName('IMG_lama.JPG')?.dateMismatch === true && byName('IMG_0001.JPG').dateMismatch === false);
+  await call('PUT', `/api/hse-reports/${r2}/photos/${byName('IMG_0001.JPG').id}`, { token: ho, body: { sky: 'S' } });
+  await call('PUT', `/api/hse-reports/${r2}/photos/${byName('IMG_0002.JPG').id}`, { token: ho, body: { sky: 'L' } });
+  await call('PUT', `/api/hse-reports/${r2}/photos/${byName('IMG_lama.JPG').id}`, { token: ho, body: { included: false, sky: 'H' } });
+  let full2 = (await call('GET', `/api/hse-reports/${r2}`, { token: ho })).body;
+  const w = full2.weatherEffective;
+  expect('cuaca per jam otomatis dari foto terdekat (pagi cerah, siang hujan)', w[8]?.code === 'S' && w[10]?.code === 'S' && w[12]?.code === 'L' && w[16]?.code === 'L'
+    && w[8].source === 'photo', w);
+  expect('foto yang tidak masuk laporan tidak dipakai untuk cuaca', !Object.values(w).some((x) => x.code === 'H'));
+  await call('PUT', `/api/hse-reports/${r2}`, { token: ho, body: { content: { weather: { 10: 'C' } } } });
+  full2 = (await call('GET', `/api/hse-reports/${r2}`, { token: ho })).body;
+  expect('cuaca jam 10 diubah manual (Berawan), jam lain tetap otomatis', full2.weatherEffective[10].code === 'C' && full2.weatherEffective[10].source === 'manual'
+    && full2.weatherEffective[9].source === 'photo');
+  const tm = await call('PUT', `/api/hse-reports/${r2}/photos/${byName('whatsapp.jpg').id}`, { token: ho, body: { takenTime: '15:45' } });
+  const fixedPh = (await call('GET', `/api/hse-reports/${r2}`, { token: ho })).body.photos.find((p) => p.original === 'whatsapp.jpg');
+  expect('jam foto diubah manual', tm.status === 200 && fixedPh.takenTime === '15:45' && fixedPh.timeSource === 'manual', fixedPh);
+  const l2 = await call('POST', `/api/hse-reports/${r2}/print-link`, { token: ho, body: { lang: 'en' } });
+  const h2 = await (await fetch(BASE + l2.body.url)).text();
+  expect('cuaca otomatis ikut tercetak (Morning: Sunny, Afternoon: Light Rain)', /Morning: Sunny/.test(h2) && /Afternoon: Light Rain/.test(h2));
 
   console.log(failures ? `\n${failures} pengujian GAGAL` : '\nSemua pengujian lulus');
   process.exit(failures ? 1 : 0);

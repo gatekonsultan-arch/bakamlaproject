@@ -100,7 +100,9 @@ class _SigPainter extends CustomPainter {
 
 /// Minta user membuat/mengunggah tanda tangan. Mengembalikan URL tanda tangan baru, atau null bila batal.
 Future<String?> promptSignature(BuildContext context, {String? reason}) async {
-  final choice = await showDialog<String>(
+  // Nilai hasil dialog: 'draw' atau Future pemilihan gambar yang DIBUKA di dalam ketukan tombol
+  // (Safari/Chrome di iPhone hanya mengizinkan membuka galeri tepat saat tombol diketuk).
+  final choice = await showDialog<Object>(
     context: context,
     builder: (ctx) => AlertDialog(
       title: const Text('Tanda tangan digital'),
@@ -110,7 +112,9 @@ Future<String?> promptSignature(BuildContext context, {String? reason}) async {
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
         OutlinedButton.icon(
-            onPressed: () => Navigator.pop(ctx, 'upload'), icon: const Icon(Icons.upload_file), label: const Text('Unggah gambar')),
+            onPressed: () => Navigator.pop(ctx, ImagePicker().pickImage(source: ImageSource.gallery)),
+            icon: const Icon(Icons.upload_file),
+            label: const Text('Unggah gambar')),
         FilledButton.icon(onPressed: () => Navigator.pop(ctx, 'draw'), icon: const Icon(Icons.draw), label: const Text('Gambar')),
       ],
     ),
@@ -120,14 +124,14 @@ Future<String?> promptSignature(BuildContext context, {String? reason}) async {
   String filename = 'ttd.png';
   if (choice == 'draw') {
     bytes = await showDialog<List<int>>(context: context, builder: (_) => const SignaturePadDialog());
-  } else {
-    final x = await ImagePicker().pickImage(source: ImageSource.gallery);
+  } else if (choice is Future<XFile?>) {
+    final x = await choice;
     if (x != null) {
       bytes = await x.readAsBytes();
       filename = x.name;
     }
   }
-  if (bytes == null) return null;
+  if (bytes == null || !context.mounted) return null;
   try {
     final r = await Api.instance.upload('/hse-reports/me/signature', [(field: 'file', filename: filename, bytes: bytes)]);
     if (context.mounted) showSnack(context, 'Tanda tangan disimpan');

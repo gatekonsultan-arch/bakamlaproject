@@ -55,7 +55,7 @@ const DEFAULT_SETTINGS = {
   proj: 'NMSS COASTAL STATION MAKASSAR CONSTRUCTION',
   loc: '',
   client: 'BAKAMLA',
-  con: '',
+  con: 'PT Prima Integra Utama',
   start: null,
   noFmt: '{no}/HSE.LH/{rom}/{yyyy}',
   insp: [],
@@ -93,6 +93,12 @@ const DEFAULT_CONTENT = {
   extraMembers: [],
 };
 
+/**
+ * Logo bawaan kop laporan (backend/assets/logos). Dipakai bila lokasi belum mengunggah logonya sendiri.
+ * Kiri: PT Prima Integra Utama (kontraktor), kanan: SRT.
+ */
+const DEFAULT_LOGOS = { logoL: 'logo-prima.png', logoR: 'logo-srt.png' };
+
 const ROM = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 
 /** Nomor laporan berurutan per hari sejak tanggal laporan pertama (sama dengan format proyek). */
@@ -120,5 +126,5 @@ function guessCategory(keys) {
 
 module.exports = {
   ACTIVITIES, CHECKLIST, CHECKLIST_ID, WEATHER, WEATHER_ID, DEFAULT_SETTINGS, DEFAULT_CONTENT,
-  reportNumber, guessCategory,
+  reportNumber, guessCategory, DEFAULT_LOGOS,
 };

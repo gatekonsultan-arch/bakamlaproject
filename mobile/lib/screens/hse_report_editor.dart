@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api.dart';
 import '../widgets/common.dart';
@@ -150,8 +149,7 @@ class _HseReportEditorState extends State<HseReportEditor> {
     if (_dirty && !await _save(quiet: true)) return;
     try {
       final r = await _api.post('/hse-reports/${widget.id}/print-link', {'lang': lang});
-      final ok = await launchUrl(Uri.parse(_api.abs(r['url'] as String)), webOnlyWindowName: '_blank');
-      if (!ok && mounted) showSnack(context, 'Tidak dapat membuka halaman cetak', error: true);
+      await openPrintPage(_api.abs(r['url'] as String));
     } catch (e) {
       if (mounted) showSnack(context, e.toString(), error: true);
     }
@@ -159,9 +157,13 @@ class _HseReportEditorState extends State<HseReportEditor> {
 
   // ------------------------------------------------------------ foto
   Future<void> _addPhotos() async {
-    if (_dirty && !await _save(quiet: true)) return;
-    final picked = await ImagePicker().pickMultiImage(imageQuality: 90, maxWidth: 2400);
+    // Galeri dibuka LANGSUNG saat tombol diketuk (syarat Safari/Chrome di iPhone), baru simpan perubahan.
+    // Foto dikirim UTUH (tanpa diperkecil di HP) agar jam & tanggal kamera (EXIF) terbaca server.
+    // Server yang memperkecil foto setelah membaca datanya.
+    final pickedFuture = ImagePicker().pickMultiImage();
+    final picked = await pickedFuture;
     if (picked.isEmpty) return;
+    if (_dirty && !await _save(quiet: true)) return;
     setState(() => _busy = true);
     try {
       final files = <({String field, String filename, List<int> bytes})>[];
@@ -214,6 +216,51 @@ class _HseReportEditorState extends State<HseReportEditor> {
     } catch (e) {
       if (mounted) showSnack(context, e.toString(), error: true);
     }
+  }
+
+  static const _skyCodes = ['S', 'C', 'L', 'H'];
+
+  List<int> _weatherHours(int a, int b) {
+    final hours = {for (var h = a; h < b; h++) h};
+    final w = (_content['weather'] as Map).cast<String, dynamic>();
+    for (final k in w.keys) {
+      if (_skyCodes.contains(w[k])) hours.add(int.parse(k));
+    }
+    return hours.toList()..sort();
+  }
+
+  /// Cuaca otomatis per jam dari foto terdekat (aturan sama dengan server: backend/src/utils/weather.js).
+  Map<int, ({String code, String photoTime})> _autoWeather() {
+    final usable = _photos
+        .where((p) => p['included'] == true && _skyCodes.contains(p['sky']) && TimePickerField.parse(p['takenTime'] as String?) != null)
+        .toList();
+    final out = <int, ({String code, String photoTime})>{};
+    if (usable.isEmpty) return out;
+    // Dihitung untuk semua jam; tab Cuaca hanya menampilkan jam kerja + jam yang diisi manual.
+    for (var h = 0; h < 24; h++) {
+      final mid = h * 60 + 30;
+      final best = usable.reduce((x, y) =>
+          (_toMin(y['takenTime'] as String) - mid).abs() < (_toMin(x['takenTime'] as String) - mid).abs() ? y : x);
+      out[h] = (code: best['sky'] as String, photoTime: best['takenTime'] as String);
+    }
+    return out;
+  }
+
+  /// Ubah jam foto manual; aktivitas yang berasal dari foto ini ikut menyesuaikan jamnya.
+  Future<void> _setPhotoTime(Map<String, dynamic> p, String time) async {
+    final old = p['takenTime'];
+    await _updatePhoto(p, {'takenTime': time});
+    setState(() {
+      p['timeSource'] = 'manual';
+      p['timeSourceLabel'] = 'diubah manual';
+      for (final a in _activities) {
+        if (a['caption'] == p['caption'] && a['time'] == old) {
+          a['time'] = time;
+          _dirty = true;
+        }
+      }
+      _photos.sort((x, y) => ((x['takenTime'] as String?) ?? '99:99').compareTo((y['takenTime'] as String?) ?? '99:99'));
+    });
   }
 
   // ------------------------------------------------------------ UI
@@ -309,20 +356,20 @@ class _HseReportEditorState extends State<HseReportEditor> {
             const SizedBox(height: 12),
             Row(children: [
               Expanded(
-                child: TextField(
-                  controller: _start,
+                child: TimePickerField(
+                  value: _start.text,
+                  label: 'Jam mulai',
                   enabled: _editable,
-                  decoration: const InputDecoration(labelText: 'Jam mulai (HH:MM)', border: OutlineInputBorder()),
-                  onChanged: (_) => _touch(() {}),
+                  onChanged: (v) => _touch(() => _start.text = v),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: TextField(
-                  controller: _finish,
+                child: TimePickerField(
+                  value: _finish.text,
+                  label: 'Jam selesai',
                   enabled: _editable,
-                  decoration: const InputDecoration(labelText: 'Jam selesai (HH:MM)', border: OutlineInputBorder()),
-                  onChanged: (_) => _touch(() {}),
+                  onChanged: (v) => _touch(() => _finish.text = v),
                 ),
               ),
             ]),
@@ -415,22 +462,30 @@ class _HseReportEditorState extends State<HseReportEditor> {
                         ],
                         onChanged: _editable ? (v) => _setPhotoActivity(p, v!) : null,
                       ),
-                      TextFormField(
-                        key: ValueKey('cap${p['id']}${p['caption']}'),
-                        initialValue: (p['caption'] as String?) ?? '',
-                        enabled: _editable,
-                        decoration: const InputDecoration(labelText: 'Keterangan foto (huruf besar)', isDense: true),
-                        onFieldSubmitted: (v) => _updatePhoto(p, {'caption': v.toUpperCase()}),
+                      // Tersimpan saat kolom ditinggalkan (di HP tombol Enter jarang ditekan).
+                      Focus(
+                        onFocusChange: (has) {
+                          final draft = p['_captionDraft'] as String?;
+                          if (!has && draft != null && draft.toUpperCase() != p['caption']) {
+                            _updatePhoto(p, {'caption': draft.toUpperCase()});
+                          }
+                        },
+                        child: TextFormField(
+                          key: ValueKey('cap${p['id']}${p['caption']}'),
+                          initialValue: (p['caption'] as String?) ?? '',
+                          enabled: _editable,
+                          decoration: const InputDecoration(labelText: 'Keterangan foto (huruf besar)', isDense: true),
+                          onChanged: (v) => p['_captionDraft'] = v,
+                          onFieldSubmitted: (v) => _updatePhoto(p, {'caption': v.toUpperCase()}),
+                        ),
                       ),
                       Row(children: [
-                        SizedBox(
-                          width: 90,
-                          child: TextFormField(
-                            initialValue: (p['takenTime'] as String?) ?? '',
-                            enabled: _editable,
-                            decoration: const InputDecoration(labelText: 'Jam', isDense: true),
-                            onFieldSubmitted: (v) => _updatePhoto(p, {'takenTime': v.trim().isEmpty ? null : v.trim()}),
-                          ),
+                        TimePickerField(
+                          width: 110,
+                          value: p['takenTime'] as String?,
+                          label: 'Jam foto',
+                          enabled: _editable,
+                          onChanged: (v) => _setPhotoTime(p, v),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -442,6 +497,23 @@ class _HseReportEditorState extends State<HseReportEditor> {
                           ),
                         ),
                       ]),
+                      if (p['timeSourceLabel'] != null || p['dateMismatch'] == true)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Wrap(spacing: 8, children: [
+                            if (p['timeSourceLabel'] != null)
+                              Text(
+                                p['timeSource'] == 'file'
+                                    ? '⚠ Jam ${p['timeSourceLabel']} (foto tanpa data kamera)'
+                                    : 'Jam ${p['timeSourceLabel']}',
+                                style: TextStyle(
+                                    fontSize: 11, color: p['timeSource'] == 'file' ? const Color(0xFFEF6C00) : Colors.green.shade700),
+                              ),
+                            if (p['dateMismatch'] == true)
+                              Text('⚠ Foto diambil ${p['takenDate']}, bukan tanggal laporan',
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFFD32F2F))),
+                          ]),
+                        ),
                       Row(children: [
                         Switch(
                             value: p['included'] == true,
@@ -481,14 +553,12 @@ class _HseReportEditorState extends State<HseReportEditor> {
                 padding: const EdgeInsets.all(12),
                 child: Column(children: [
                   Row(children: [
-                    SizedBox(
-                      width: 80,
-                      child: TextFormField(
-                        initialValue: a['time'] as String,
-                        enabled: _editable,
-                        decoration: const InputDecoration(labelText: 'Jam', isDense: true),
-                        onChanged: (v) => _touch(() => a['time'] = v.trim()),
-                      ),
+                    TimePickerField(
+                      width: 100,
+                      value: a['time'] as String?,
+                      label: 'Jam',
+                      enabled: _editable,
+                      onChanged: (v) => _touch(() => a['time'] = v),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -585,6 +655,7 @@ class _HseReportEditorState extends State<HseReportEditor> {
       b = 17;
     }
     final wp = (_content['weatherPhotos'] as Map).cast<String, dynamic>();
+    final auto = _autoWeather();
     final photoItems = [
       const DropdownMenuItem<int?>(value: null, child: Text('— tidak ada —')),
       for (final p in _photos)
@@ -595,36 +666,54 @@ class _HseReportEditorState extends State<HseReportEditor> {
       Constrained(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('Cuaca per jam', style: Theme.of(context).textTheme.titleMedium),
-          const Text('Masuk ke tabel cuaca bulanan di laporan.', style: TextStyle(fontSize: 12)),
+          const Text(
+              'Terisi OTOMATIS dari "Cuaca di foto" pada foto yang jamnya paling dekat. Ubah bila perlu; pilih "Otomatis" '
+              'untuk kembali mengikuti foto. Masuk ke tabel cuaca bulanan di laporan.',
+              style: TextStyle(fontSize: 12)),
+          if (!_photos.any((p) => (p['sky'] ?? '') != '' && p['included'] == true))
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text('⚠ Belum ada foto yang diberi "Cuaca di foto". Pilih cuaca pada foto di tab Foto & Aktivitas.',
+                  style: TextStyle(fontSize: 12, color: Color(0xFFEF6C00))),
+            ),
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            for (var h = a; h < b; h++)
-              SizedBox(
-                width: 130,
-                child: DropdownButtonFormField<String>(
-                  value: (w['$h'] as String?) ?? '',
-                  isDense: true,
-                  decoration: InputDecoration(labelText: '${h.toString().padLeft(2, '0')}.00', border: const OutlineInputBorder()),
-                  items: [for (final e in _skyLabels.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-                  onChanged: _editable ? (v) => _touch(() => w['$h'] = v ?? '') : null,
-                ),
-              ),
+            for (final h in _weatherHours(a, b))
+              Builder(builder: (_) {
+                final eff = auto[h];
+                final manual = (w['$h'] as String?) ?? '';
+                return SizedBox(
+                  width: 150,
+                  child: DropdownButtonFormField<String>(
+                    value: _skyCodes.contains(manual) ? manual : 'AUTO',
+                    isDense: true,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: '${h.toString().padLeft(2, '0')}.00 · ${_skyCodes.contains(manual) ? 'manual' : 'otomatis'}',
+                      border: const OutlineInputBorder(),
+                    ),
+                    // Teks ringkas di kotak (layar HP sempit); keterangan lengkap tampil saat daftar dibuka.
+                    selectedItemBuilder: (_) => [
+                      Text(eff == null ? '—' : _skyLabels[eff.code]!, overflow: TextOverflow.ellipsis),
+                      for (final c in _skyCodes) Text(_skyLabels[c]!),
+                    ],
+                    items: [
+                      DropdownMenuItem(
+                        value: 'AUTO',
+                        child: Text(eff == null
+                            ? 'Otomatis (belum ada)'
+                            : 'Otomatis: ${_skyLabels[eff.code]} (foto ${eff.photoTime})',
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      for (final c in _skyCodes) DropdownMenuItem(value: c, child: Text(_skyLabels[c]!)),
+                    ],
+                    onChanged: _editable
+                        ? (v) => _touch(() => v == null || v == 'AUTO' ? w.remove('$h') : w['$h'] = v)
+                        : null,
+                  ),
+                );
+              }),
           ]),
-          if (_editable)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                icon: const Icon(Icons.auto_fix_high),
-                label: const Text('Isi dari cuaca di foto'),
-                onPressed: () => _touch(() {
-                  for (var h = a; h < b; h++) {
-                    final near = _photos.where((p) =>
-                        (p['sky'] ?? '') != '' && p['takenTime'] != null && (_toMin(p['takenTime'] as String) ~/ 60 - h).abs() <= 1);
-                    if (near.isNotEmpty) w['$h'] = near.first['sky'];
-                  }
-                }),
-              ),
-            ),
           const SizedBox(height: 16),
           DropdownButtonFormField<int?>(
             value: ids.contains(wp['mid']) ? wp['mid'] as int? : null,

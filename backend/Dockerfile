@@ -5,6 +5,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY src ./src
 COPY scripts ./scripts
+COPY assets ./assets
 RUN mkdir -p /app/uploads && chown node:node /app/uploads
 USER node
 EXPOSE 3000

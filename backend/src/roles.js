@@ -25,6 +25,8 @@ const PERMISSIONS = Object.freeze({
   manageUsers: [R.SUPERADMIN, R.ADMIN],
   manageSites: [R.SUPERADMIN, R.ADMIN],
   viewReports: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER, R.HSE_MANAGER],
+  // Absen di luar area baru diakui hadir setelah disetujui PM / Site Manager (SM: lokasinya saja).
+  approveAttendance: [R.SUPERADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER],
 
   viewMaterials: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER, R.LOGISTIK],
   planMaterials: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER],
@@ -46,6 +48,11 @@ const PERMISSIONS = Object.freeze({
   submitPayroll: [R.SUPERADMIN, R.SITE_MANAGER],
   approvePayroll: [R.SUPERADMIN, R.PROJECT_MANAGER],
   markPayrollPaid: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER],
+
+  // ATP Checklist (mutu pekerjaan struktur)
+  viewAtp: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER],
+  writeAtp: [R.SUPERADMIN, R.SITE_MANAGER],
+  approveAtp: [R.SUPERADMIN, R.PROJECT_MANAGER],
 });
 
 /** Role yang aksesnya dibatasi ke lokasi (site) miliknya bila user ditugaskan ke satu site. */

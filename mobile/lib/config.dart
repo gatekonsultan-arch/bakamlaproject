@@ -2,6 +2,9 @@
 ///   flutter build web --dart-define=API_URL=https://absensi.domainanda.com
 ///   flutter build apk --dart-define=API_URL=https://absensi.domainanda.com
 /// Default kosong = API satu domain dengan aplikasi web (via Nginx).
+/// Versi aplikasi yang tampil di halaman login & Profil — untuk memastikan server sudah memakai versi terbaru.
+const String appVersion = '2026.11.19 (kamera iPhone + approval absen)';
+
 const String apiBaseUrl = String.fromEnvironment('API_URL', defaultValue: '');
 
 const Map<String, String> roleLabels = {
@@ -24,6 +27,9 @@ bool canViewReports(String role) => const {
 
 bool _in(String role, Set<String> roles) => roles.contains(role);
 
+// Persetujuan absen di luar area (Site Manager: lokasinya saja)
+bool canApproveAttendance(String r) => _in(r, {'SUPERADMIN', 'PROJECT_MANAGER', 'SITE_MANAGER'});
+
 // Material logistik
 bool canViewMaterials(String r) =>
     _in(r, {'SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'SITE_MANAGER', 'LOGISTIK'});
@@ -43,3 +49,7 @@ bool canViewWorkers(String r) => _in(r, {'SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER
 bool canManageWorkers(String r) => canViewWorkers(r);
 bool canRecordWorkerAttendance(String r) => _in(r, {'SUPERADMIN', 'SITE_MANAGER'});
 bool canRecordCashAdvance(String r) => _in(r, {'SUPERADMIN', 'ADMIN', 'SITE_MANAGER'});
+
+// ATP Checklist (mutu pekerjaan struktur)
+bool canViewAtp(String r) => _in(r, {'SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'SITE_MANAGER'});
+bool canWriteAtp(String r) => _in(r, {'SUPERADMIN', 'SITE_MANAGER'});

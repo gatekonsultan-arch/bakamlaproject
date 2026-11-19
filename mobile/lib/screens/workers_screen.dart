@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../config.dart';
 import '../main.dart';
@@ -422,7 +421,7 @@ class _PayrollTabState extends State<_PayrollTab> {
   Future<void> _open(String format) async {
     try {
       final r = await Api.instance.post('/workers/payroll/link', {'siteId': widget.siteId, 'weekStart': fmtYmd.format(_week), 'format': format});
-      await launchUrl(Uri.parse(Api.instance.abs(r['url'] as String)), webOnlyWindowName: '_blank');
+      await openPrintPage(Api.instance.abs(r['url'] as String));
     } catch (e) {
       if (mounted) showSnack(context, e.toString(), error: true);
     }

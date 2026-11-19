@@ -87,9 +87,9 @@ const PLAN_SELECT = `
                       SUM(CASE WHEN movement_type = 'ADJ' THEN qty ELSE 0 END) AS qty_adj
                  FROM stock_movements GROUP BY site_material_id) mv ON mv.site_material_id = sm.id
     LEFT JOIN (SELECT i.site_material_id,
-                      SUM(CASE WHEN pr.status IN ('APPROVED','ORDERED','PARTIAL')
+                      SUM(CASE WHEN pr.status IN ('APPROVED','ORDERED','PARTIAL') AND i.item_status = 'APPROVED'
                                THEN i.qty - i.qty_received ELSE 0 END) AS on_order,
-                      SUM(CASE WHEN pr.status = 'PENDING' THEN i.qty ELSE 0 END) AS pending
+                      SUM(CASE WHEN pr.status = 'PENDING' AND i.item_status = 'PENDING' THEN i.qty ELSE 0 END) AS pending
                  FROM purchase_request_items i
                  JOIN purchase_requests pr ON pr.id = i.request_id
                 GROUP BY i.site_material_id) po ON po.site_material_id = sm.id`;
