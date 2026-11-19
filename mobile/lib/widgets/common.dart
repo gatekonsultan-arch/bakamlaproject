@@ -116,3 +116,30 @@ class TimePickerField extends StatelessWidget {
         ),
       );
 }
+
+/// Label status pengakuan kehadiran (absen di luar area perlu persetujuan PM / Site Manager).
+class ApprovalBadge extends StatelessWidget {
+  final String status;
+  final String label;
+  const ApprovalBadge(this.status, this.label, {super.key});
+
+  static const colors = {
+    'PENDING': Color(0xFFEF6C00),
+    'APPROVED': Color(0xFF2E7D32),
+    'REJECTED': Color(0xFFC62828),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final c = colors[status] ?? Colors.grey;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: c.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
+      child: Text(label, style: TextStyle(color: c, fontWeight: FontWeight.w600, fontSize: 12)),
+    );
+  }
+}
+
+/// Buka titik GPS di Google Maps (untuk memeriksa lokasi absen di luar area).
+Future<void> openMap(double lat, double lng) =>
+    launchUrl(Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng'), mode: LaunchMode.externalApplication);

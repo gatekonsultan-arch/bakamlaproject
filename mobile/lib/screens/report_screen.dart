@@ -88,6 +88,7 @@ class _ReportScreenState extends State<ReportScreen> {
                 Wrap(spacing: 12, runSpacing: 12, children: [
                   _Stat('Total pegawai aktif', '${s['totalUsers']}'),
                   _Stat('Hadir (${s['date']})', '${s['present']}'),
+                  if ((s['pending'] ?? 0) > 0) _Stat('Menunggu persetujuan', '${s['pending']}'),
                   _Stat('Sudah pulang', '${s['checkedOut']}'),
                   _Stat('Belum absen', '${absent.length}'),
                 ]),
@@ -125,6 +126,7 @@ class _ReportScreenState extends State<ReportScreen> {
                       DataColumn(label: Text('Pulang')),
                       DataColumn(label: Text('Jarak (m)')),
                       DataColumn(label: Text('Selfie')),
+                      DataColumn(label: Text('Status')),
                     ], rows: [
                       for (final a in _items)
                         DataRow(cells: [
@@ -137,6 +139,16 @@ class _ReportScreenState extends State<ReportScreen> {
                           DataCell(Text('${a.checkIn.distanceM?.round() ?? '-'}'
                               ' / ${a.checkOut?.distanceM?.round() ?? '-'}')),
                           DataCell(_SelfieThumbs(a)),
+                          DataCell(Tooltip(
+                            message: [
+                              if (a.checkIn.reason != null) 'Masuk: ${a.checkIn.reason}',
+                              if (a.checkOut?.reason != null) 'Pulang: ${a.checkOut!.reason}',
+                              if (a.approval.byName != null) 'Oleh: ${a.approval.byName}',
+                              if (a.approval.note != null) 'Catatan: ${a.approval.note}',
+                            ].join('\n'),
+                            child: ApprovalBadge(a.approval.status,
+                                a.outside && a.approval.status == 'APPROVED' ? 'Luar area · disetujui' : a.approval.label),
+                          )),
                         ]),
                     ]),
                   ),

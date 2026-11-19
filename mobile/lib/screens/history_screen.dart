@@ -52,9 +52,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 return Constrained(
                   child: ListTile(
                     leading: Icon(a.checkOut == null ? Icons.timelapse : Icons.check_circle_outline),
-                    title: Text(fmtDate.format(DateTime.parse(a.date))),
+                    title: Row(children: [
+                      Flexible(child: Text(fmtDate.format(DateTime.parse(a.date)))),
+                      if (a.outside || a.approval.status != 'APPROVED') ...[
+                        const SizedBox(width: 8),
+                        ApprovalBadge(a.approval.status, a.approval.label),
+                      ],
+                    ]),
                     subtitle: Text(
-                        '${a.siteName}\nMasuk ${fmtTime.format(a.checkIn.at)}  •  Pulang ${a.checkOut == null ? '-' : fmtTime.format(a.checkOut!.at)}'),
+                        '${a.siteName}${a.outside ? ' (di luar area)' : ''}\nMasuk ${fmtTime.format(a.checkIn.at)}  •  Pulang ${a.checkOut == null ? '-' : fmtTime.format(a.checkOut!.at)}'
+                        '${a.approval.note != null ? '\nCatatan: ${a.approval.note}' : ''}'),
                     isThreeLine: true,
                     trailing: a.workDuration == null ? null : Text(formatDuration(a.workDuration!)),
                   ),

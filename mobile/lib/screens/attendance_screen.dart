@@ -122,6 +122,55 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     await _captureAndSubmit(checkIn, photo);
   }
 
+  /// Dialog keterangan absen di luar area. Mengembalikan keterangan, atau null bila batal.
+  Future<String?> _askOutsideReason(bool checkIn, Map<String, dynamic> info) {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+        final text = ctrl.text.trim();
+        return AlertDialog(
+          title: Text(checkIn ? 'Check-in di luar area' : 'Check-out di luar area'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Anda berada ${info['distanceM'] is num ? '${(info['distanceM'] as num).round()} m' : 'jauh'} dari '
+                  '${info['siteName'] ?? 'lokasi kerja'} (radius ${info['radiusM'] ?? '-'} m).'),
+              const SizedBox(height: 8),
+              const Text('Absen tetap bisa dilakukan dengan keterangan, tetapi baru diakui hadir setelah '
+                  'disetujui Project Manager atau Site Manager.',
+                  style: TextStyle(fontSize: 13)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                maxLength: 500,
+                minLines: 2,
+                maxLines: 4,
+                onChanged: (_) => set(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Keterangan (wajib)',
+                  hintText: 'Contoh: Rapat koordinasi di kantor Bakamla Balikpapan',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              if (text.isNotEmpty && text.length < 10)
+                const Text('Minimal 10 karakter: jelaskan lokasi & alasannya.',
+                    style: TextStyle(fontSize: 12, color: Colors.red)),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            FilledButton(
+              onPressed: text.length >= 10 ? () => Navigator.pop(ctx, text) : null,
+              child: const Text('Kirim untuk disetujui'),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
   void _cancelAttempt() => setState(() {
         _attempt++;
         _busy = false;
@@ -156,11 +205,31 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       }
       setState(() => _status = 'Lokasi didapat (akurasi ${pos.accuracy.round()} m). Memeriksa wajah & mengirim...');
       final fields = LocationService.toPayload(pos, note: _note.text).map((k, v) => MapEntry(k, '$v'));
-      final r = await _api.upload(
-        checkIn ? '/attendance/check-in' : '/attendance/check-out',
-        [(field: 'photo', filename: photo.name.isEmpty ? 'selfie.jpg' : photo.name, bytes: await photo.readAsBytes())],
-        fields: fields,
-      );
+      final bytes = await photo.readAsBytes();
+      final filename = photo.name.isEmpty ? 'selfie.jpg' : photo.name;
+      Future<Map<String, dynamic>> send() => _api.upload(
+            checkIn ? '/attendance/check-in' : '/attendance/check-out',
+            [(field: 'photo', filename: filename, bytes: bytes)],
+            fields: fields,
+          );
+      Map<String, dynamic> r;
+      try {
+        r = await send();
+      } on ApiException catch (e) {
+        if (e.data['code'] != 'OUTSIDE_AREA' || fields.containsKey('outsideReason')) rethrow;
+        // Di luar area: boleh absen dengan keterangan, lalu menunggu persetujuan PM / Site Manager.
+        if (stale()) return;
+        setState(() => _status = 'Anda di luar area lokasi kerja. Isi keterangan...');
+        final reason = await _askOutsideReason(checkIn, e.data);
+        if (stale()) return;
+        if (reason == null) {
+          setState(() => _lastError = 'Absen dibatalkan. ${e.message}');
+          return;
+        }
+        fields['outsideReason'] = reason;
+        setState(() => _status = 'Mengirim absen di luar area...');
+        r = await send();
+      }
       if (stale()) return;
       _note.clear();
       setState(() => _today = Attendance.fromJson(r['attendance'] as Map<String, dynamic>));
@@ -212,6 +281,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 Expanded(child: _TimeCard(label: 'Pulang', point: t?.checkOut, icon: Icons.logout)),
               ]),
               if (t != null) ...[
+                if (t.outside || t.approval.status != 'APPROVED') ...[
+                  const SizedBox(height: 12),
+                  _ApprovalCard(t),
+                ],
                 const SizedBox(height: 8),
                 Text('Lokasi absen: ${t.siteName}', style: TextStyle(color: cs.outline)),
                 if (t.workDuration != null)
@@ -275,7 +348,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ],
               const SizedBox(height: 24),
               Text(
-                'Absensi hanya diterima jika Anda berada di dalam radius lokasi kerja, akurasi GPS cukup baik, '
+                'Absensi langsung diakui jika Anda berada di dalam radius lokasi kerja. Di luar area, absen tetap bisa '
+                'dengan keterangan dan baru diakui setelah disetujui Project Manager / Site Manager. '
+                'Akurasi GPS harus cukup baik, '
                 'tidak menggunakan aplikasi pemalsu lokasi, dan selfie berisi wajah Anda sendiri (satu wajah, terlihat jelas). '
                 'Foto selfie dihapus otomatis setelah 90 hari.',
                 style: TextStyle(color: cs.outline, fontSize: 12),
@@ -316,6 +391,54 @@ class _TimeCard extends StatelessWidget {
                   errorBuilder: (_, __, ___) => const SizedBox.shrink()),
             ),
           ],
+        ]),
+      ),
+    );
+  }
+}
+
+/// Status pengakuan kehadiran untuk absen di luar area.
+class _ApprovalCard extends StatelessWidget {
+  final Attendance t;
+  const _ApprovalCard(this.t);
+
+  @override
+  Widget build(BuildContext context) {
+    final a = t.approval;
+    final color = ApprovalBadge.colors[a.status] ?? Colors.grey;
+    final (icon, title) = switch (a.status) {
+      'PENDING' => (Icons.hourglass_top, 'Menunggu persetujuan Project Manager / Site Manager'),
+      'REJECTED' => (Icons.cancel_outlined, 'Absensi ditolak — tidak diakui hadir'),
+      _ => (Icons.verified_outlined, 'Absen di luar area telah disetujui — diakui hadir'),
+    };
+    return Card(
+      color: Color.alphaBlend(color.withValues(alpha: 0.08), Theme.of(context).colorScheme.surface),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+          side: BorderSide(color: color.withValues(alpha: 0.5)), borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(icon, color: color),
+            const SizedBox(width: 10),
+            Expanded(child: Text(title, style: TextStyle(color: color, fontWeight: FontWeight.w600))),
+          ]),
+          if (t.checkIn.outside) ...[
+            const SizedBox(height: 8),
+            Text('Keterangan masuk: ${t.checkIn.reason ?? '-'}'),
+          ],
+          if (t.checkOut?.outside == true) ...[
+            const SizedBox(height: 4),
+            Text('Keterangan pulang: ${t.checkOut!.reason ?? '-'}'),
+          ],
+          if (a.byName != null) ...[
+            const SizedBox(height: 6),
+            Text('${a.status == 'REJECTED' ? 'Ditolak' : 'Disetujui'} oleh ${a.byName}'
+                '${a.byRole != null ? ' (${a.byRole})' : ''}${a.at != null ? ', ${fmtTime.format(a.at!)}' : ''}',
+                style: const TextStyle(fontSize: 12)),
+          ],
+          if (a.note != null) Text('Catatan: ${a.note}', style: const TextStyle(fontSize: 12)),
         ]),
       ),
     );

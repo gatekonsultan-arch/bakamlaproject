@@ -43,4 +43,12 @@ void main() {
     expect(canViewAtp('HSE_OFFICER'), isFalse);
     expect(canViewAtp('LOGISTIK'), isFalse);
   });
+
+  test('approval absen luar area: PM & Site Manager', () {
+    expect(canApproveAttendance('PROJECT_MANAGER'), isTrue);
+    expect(canApproveAttendance('SITE_MANAGER'), isTrue);
+    expect(canApproveAttendance('SUPERADMIN'), isTrue);
+    expect(canApproveAttendance('HSE_MANAGER'), isFalse);
+    expect(canApproveAttendance('LOGISTIK'), isFalse);
+  });
 }

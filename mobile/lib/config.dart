@@ -24,6 +24,9 @@ bool canViewReports(String role) => const {
 
 bool _in(String role, Set<String> roles) => roles.contains(role);
 
+// Persetujuan absen di luar area (Site Manager: lokasinya saja)
+bool canApproveAttendance(String r) => _in(r, {'SUPERADMIN', 'PROJECT_MANAGER', 'SITE_MANAGER'});
+
 // Material logistik
 bool canViewMaterials(String r) =>
     _in(r, {'SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'SITE_MANAGER', 'LOGISTIK'});

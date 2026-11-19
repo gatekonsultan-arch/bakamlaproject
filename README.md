@@ -1,7 +1,7 @@
 # Aplikasi Proyek: Absensi, Laporan Harian K3 & Kontrol Material — Web & Mobile
 
 Aplikasi proyek konstruksi dengan tiga modul:
-1. **Absensi geotagging + selfie wajah**: check-in/out hanya sah di dalam radius lokasi kerja dan dengan selfie berisi tepat satu wajah.
+1. **Absensi geotagging + selfie wajah**: check-in/out di dalam radius lokasi kerja langsung diakui. Di luar area, absen tetap bisa dengan keterangan, tetapi baru diakui hadir setelah disetujui Project Manager / Site Manager (menu **Approval**). Selfie wajib berisi tepat satu wajah.
 2. **Laporan Harian K3**: disusun HSE Officer, diketahui PIC Site, disetujui HSE Manager, lalu dicetak ke PDF A4. Contoh hasil: [docs/contoh-laporan-harian-k3.pdf](docs/contoh-laporan-harian-k3.pdf)
 3. **Tenaga kerja harian & rekap upah mingguan**: tukang, mandor, buruh diabsen Site Manager di lokasi (hadir / ½ hari / tidak masuk + lembur), kasbon dipotong, rekap Senin–Sabtu disetujui PM. Contoh: [docs/contoh-rekap-upah-mingguan.pdf](docs/contoh-rekap-upah-mingguan.pdf)
 4. **ATP Checklist (mutu pekerjaan struktur)**: Site Manager memeriksa ukuran DED vs aktual per item (fondasi, pembesian, kolom, balok, plat), PM menyetujui, lalu dicetak untuk ditandatangani Inspektur/pengawas.
@@ -20,7 +20,7 @@ Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpa
 
 | Folder      | Isi |
 |-------------|-----|
-| `database/` | Skema Oracle: absensi (01), role (02), material (03), laporan K3 (04), tanda tangan (05), tenaga kerja & upah (06), selfie (07), material submission & ATP (08), jam foto (09) |
+| `database/` | Skema Oracle: absensi (01), role (02), material (03), laporan K3 (04), tanda tangan (05), tenaga kerja & upah (06), selfie (07), material submission & ATP (08), jam foto (09), absen luar area (10) |
 | `backend/`  | REST API (Node.js, Express, node-oracledb mode *thin* — tanpa Instant Client) |
 | `mobile/`   | Aplikasi Flutter (web + Android + iOS) |
 | `deploy/`   | Docker Compose (Oracle + API), konfigurasi Nginx, skrip backup |
@@ -32,6 +32,7 @@ Satu kode aplikasi (Flutter) berjalan di **web, Android, dan iOS**. Data disimpa
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
 | Login, check-in/out, riwayat sendiri | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Rekap absensi | semua | semua | semua | site-nya | semua | – | – |
+| **Approval** absen di luar area | semua | – | semua | site-nya (bukan PM) | – | – | – |
 | Kelola lokasi | ✓ | ✓ | – | – | – | – | – |
 | Kelola pengguna | semua | selain SA/Admin | – | – | – | – | – |
 | **Material:** input kebutuhan & ambang batas | ✓ | ✓ | ✓ | site-nya | – | – | – |
@@ -118,10 +119,15 @@ Formulir *Material Purchase Submission & Approval* menyatu dengan alur **Pembeli
 1. Admin mendaftarkan **lokasi kerja**: koordinat + radius (mis. 150 m). User bisa ditugaskan ke satu lokasi.
 2. Saat absen, aplikasi mengambil GPS akurasi tinggi lalu mengirim koordinat ke server.
 3. **Server** (bukan aplikasi) menghitung jarak (rumus Haversine) dan menolak jika:
-   - di luar radius lokasi kerja,
    - akurasi GPS lebih buruk dari `MAX_GPS_ACCURACY_M` (default 100 m),
    - Android melaporkan *mock location* (aplikasi fake GPS).
-4. Satu catatan per orang per hari (check-in lalu check-out), tanggal mengikuti `APP_TIMEZONE` (default WIB).
+4. **Di luar radius lokasi kerja**: aplikasi meminta **keterangan** (minimal 10 karakter, mis. "Rapat di kantor Bakamla"). Absen tercatat dengan status **Menunggu persetujuan** dan **belum dihitung hadir** di rekap.
+   - Persetujuan ada di menu **Approval** milik Project Manager & Site Manager. Kartu menampilkan selfie, jarak, keterangan, dan tombol "Lihat di peta".
+   - **Setujui** → diakui hadir. **Tolak** → wajib alasan, tidak dihitung hadir, dan karyawan melihat alasannya.
+   - Site Manager hanya memutus lokasinya sendiri dan tidak untuk absensi Project Manager. Tidak ada yang bisa menyetujui absensinya sendiri. PM memutus semua lokasi.
+   - Check-out di luar area membuat absensi hari itu perlu disetujui lagi.
+   - Rekap & CSV memuat status, keterangan, dan siapa yang memutus.
+5. Satu catatan per orang per hari (check-in lalu check-out), tanggal mengikuti `APP_TIMEZONE` (default WIB).
 
 ### Selfie wajah saat absen
 - Check-in dan check-out **wajib selfie** (kamera depan). **Server** (bukan HP) memeriksa foto dengan model deteksi wajah
@@ -192,6 +198,7 @@ API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test.
 API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-modules.js   # material & laporan K3
 API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-workers.js   # tenaga kerja & rekap upah
 API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-atp.js       # ATP checklist
+API_URL=http://localhost:3000 SUPERADMIN_PASSWORD='...' node scripts/smoke-test-outside.js   # absen luar area & approval
 ```
 
 ### Izin lokasi di HP (setelah `flutter create`)

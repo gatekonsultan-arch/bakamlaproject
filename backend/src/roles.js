@@ -25,6 +25,8 @@ const PERMISSIONS = Object.freeze({
   manageUsers: [R.SUPERADMIN, R.ADMIN],
   manageSites: [R.SUPERADMIN, R.ADMIN],
   viewReports: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER, R.HSE_MANAGER],
+  // Absen di luar area baru diakui hadir setelah disetujui PM / Site Manager (SM: lokasinya saja).
+  approveAttendance: [R.SUPERADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER],
 
   viewMaterials: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER, R.LOGISTIK],
   planMaterials: [R.SUPERADMIN, R.ADMIN, R.PROJECT_MANAGER, R.SITE_MANAGER],
